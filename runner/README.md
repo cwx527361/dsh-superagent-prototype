@@ -122,6 +122,33 @@ answers `503 no runner online can drive <agent>` otherwise. Today only
 `opencode` has a driver; a job asking for anything else fails with
 `agent_unsupported` rather than silently running something else.
 
+## Live sessions (chat mode)
+
+A *session* is not a job. `POST /sessions` opens one opencode session on a runner
+and keeps it; every later message is another turn, and the person can keep
+talking. The runner subscribes to opencode's `/api/event` stream and forwards
+every event for that session, so the hub sees the whole thing — text and
+reasoning deltas, each tool call with its input, each tool result, token and
+cost per step — not just a final summary.
+
+```bash
+curl -sX POST localhost:4096/sessions -H 'authorization: Bearer dev-token' \
+  -H 'content-type: application/json' \
+  -d '{"agent":"opencode","directory":"/path/to/repo","model":"deepseek/deepseek-flash"}'
+# { "sessionId": "sess_…", "status": "opening" }
+
+curl -sX POST localhost:4096/sessions/sess_…/messages -H 'authorization: Bearer dev-token' \
+  -H 'content-type: application/json' -d '{"text":"Read TRANSCRIPT.md and reply with its content"}'
+
+curl -s localhost:4096/sessions/sess_…   # transcript
+```
+
+`parts[]` is the transcript in reading order: `text`, `reasoning`, `tool`
+(name, input, status, output) and `step` (finish reason, tokens, cost); raw
+events stay in `events[]` so nothing is lost if the mapping misses a type.
+Verified end to end: a `read` tool part carried its path and file content, the
+assistant text, and per-step token counts.
+
 ## Drivers: picking an agent activates it
 
 `dsh_runner/drivers.py` is the whole activation mechanism: a table mapping an

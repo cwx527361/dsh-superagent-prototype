@@ -77,3 +77,36 @@ class Opencode:
             await self._call("POST", f"/api/session/{session_id}/abort", {})
         except OpencodeError:
             pass
+
+    async def events(self) -> "AsyncIterator[dict[str, Any]]":
+        """Server-sent events (`/api/event`), parsed off the event loop."""
+        import asyncio
+
+        queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=4096)
+        loop = asyncio.get_running_loop()
+
+        def reader() -> None:
+            req = urllib.request.Request(self.base + "/api/event", method="GET")
+            if self.password:
+                token = base64.b64encode(f"opencode:{self.password}".encode()).decode()
+                req.add_header("authorization", "Basic " + token)
+            try:
+                with urllib.request.urlopen(req, timeout=None) as res:
+                    for raw in res:
+                        line = raw.decode(errors="replace").strip()
+                        if not line.startswith("data:"):
+                            continue
+                        try:
+                            event = json.loads(line[5:].strip())
+                        except json.JSONDecodeError:
+                            continue
+                        loop.call_soon_threadsafe(queue.put_nowait, event)
+            except Exception:  # noqa: BLE001 - the stream ends with the server
+                return
+
+        task = asyncio.create_task(asyncio.to_thread(reader))
+        try:
+            while True:
+                yield await queue.get()
+        finally:
+            task.cancel()

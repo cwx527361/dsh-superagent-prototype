@@ -48,6 +48,13 @@ for (const [id, j] of Object.entries(load('jobs.json', {}))) {
 const persistDevices = () => save('devices.json', Object.fromEntries(
   [...devices].map(([id, d]) => [id, { id, token: d.token, publicKey: d.publicKey, os: d.os, arch: d.arch, version: d.version, maxConcurrency: d.maxConcurrency, lastSeen: d.lastSeen }]),
 ))
+// Live chat sessions: hub sessionId -> transcript, relayed from the runner's
+// opencode event stream. Unlike a job these stay open across turns.
+const sessions = new Map()
+const persistSessions = () => save('sessions.json', Object.fromEntries(
+  [...sessions].map(([id, s]) => [id, { ...s, deviceWs: undefined }]),
+))
+
 const persistJobs = () => save('jobs.json', Object.fromEntries(
   [...jobs].map(([id, j]) => [id, { ...j, spec: j.spec, events: j.events }]),
 ))
@@ -98,6 +105,77 @@ function pickDevice(preferred, agent) {
   return candidates[0] ?? null
 }
 
+// Turn opencode's event vocabulary into a transcript the panel can render:
+// text and reasoning streams accumulate, tool calls keep their input/output,
+// and a finished execution closes the turn. Raw events stay in session.events
+// so nothing is lost even when this mapping misses a type.
+const partKey = (data, kind) => `${data.assistantMessageID ?? ''}:${data.ordinal ?? 0}:${kind}`
+const findPart = (session, key) => session.parts.find((p) => p.key === key)
+
+function applyEvent(session, event) {
+  const data = event?.data ?? {}
+  const type = event?.type ?? ''
+  if (!type.startsWith('session.')) return
+  if (type === 'session.renamed' && data.title) session.title = data.title
+  if (type === 'session.usage.updated') session.usage = { cost: data.cost, tokens: data.tokens }
+
+  const streaming = {
+    'session.text.delta': 'text',
+    'session.reasoning.delta': 'reasoning',
+  }[type]
+  if (streaming) {
+    const key = partKey(data, streaming)
+    let part = findPart(session, key)
+    if (!part) {
+      part = { key, kind: streaming, text: '', at: new Date().toISOString() }
+      session.parts.push(part)
+    }
+    part.text += data.delta ?? ''
+    return
+  }
+  if (type === 'session.text.ended' || type === 'session.reasoning.ended') {
+    const kind = type === 'session.text.ended' ? 'text' : 'reasoning'
+    const part = findPart(session, partKey(data, kind))
+    if (part) part.text = data.text ?? part.text
+    return
+  }
+  if (type === 'session.tool.input.started') {
+    if (!session.parts.some((p) => p.key === `tool:${data.id}`)) {
+      session.parts.push({ key: `tool:${data.id}`, kind: 'tool', id: data.id, name: data.name,
+        status: 'pending', input: null, output: '', at: new Date().toISOString() })
+    }
+    return
+  }
+  if (type === 'session.tool.called') {
+    let part = session.parts.find((p) => p.key === `tool:${data.id}`)
+    if (!part) {
+      part = { key: `tool:${data.id}`, kind: 'tool', id: data.id, name: data.name,
+        status: 'called', input: null, output: '', at: new Date().toISOString() }
+      session.parts.push(part)
+    }
+    part.status = 'called'
+    part.input = data.input
+    if (data.name) part.name = data.name
+    return
+  }
+  if (type === 'session.tool.success' || type === 'session.tool.failed') {
+    const part = session.parts.find((p) => p.key === `tool:${data.id}`)
+    if (part) {
+      part.status = type === 'session.tool.success' ? 'success' : 'failed'
+      part.output = (data.content ?? []).map((c) => c.text ?? '').join('').slice(0, 4000) || (data.error ?? '')
+    }
+    return
+  }
+  if (type === 'session.step.ended') {
+    session.parts.push({ key: `step:${data.assistantMessageID}:${data.finish}`, kind: 'step',
+      finish: data.finish, cost: data.cost, tokens: data.tokens, at: new Date().toISOString() })
+    return
+  }
+  if (type === 'session.execution.succeeded' || type === 'session.execution.failed') {
+    session.turn = { state: type.endsWith('succeeded') ? 'ready' : 'failed', at: new Date().toISOString() }
+  }
+}
+
 // --- HTTP server -----------------------------------------------------------
 
 const server = http.createServer(async (req, res) => {
@@ -133,6 +211,56 @@ const server = http.createServer(async (req, res) => {
 
     if (route === 'POST /runner/oauth/start' || route === 'POST /runner/oauth/exchange') {
       return json(res, 501, { error: 'OAuth wiring is not part of the M1 POC; use POST /runner/register with an access token' })
+    }
+
+    if (route === 'POST /sessions') {
+      const body = await readJSON(req)
+      const agent = body.agent || 'opencode'
+      const device = pickDevice(body.deviceId, agent)
+      if (!device) return json(res, 503, { error: `no runner online can drive ${agent}` })
+      const sessionId = `sess_${randomBytes(6).toString('hex')}`
+      const session = {
+        id: sessionId, agent, deviceId: device.id, directory: body.directory ?? '', model: body.model ?? '',
+        title: body.title ?? '', status: 'opening', createdAt: new Date().toISOString(),
+        agentSession: null, messages: [], events: [], parts: [],
+      }
+      sessions.set(sessionId, session)
+      sendWS(device.ws, 'session.open', {
+        sessionId, agent, directory: session.directory, model: session.model,
+      })
+      log(`session ${sessionId} opening on ${device.id} (${agent})`)
+      return json(res, 200, { sessionId, deviceId: device.id, status: session.status })
+    }
+
+    if (route === 'GET /sessions') {
+      const list = [...sessions.values()].map(({ id, agent, deviceId, title, status, createdAt, messageCount }) => ({ id, agent, deviceId, title, status, createdAt, messageCount }))
+      return json(res, 200, { sessions: list.reverse() })
+    }
+
+    const sessionMatch = url.pathname.match(/^\/sessions\/([^/]+)(\/(messages))?$/)
+    if (sessionMatch) {
+      const session = sessions.get(sessionMatch[1])
+      if (!session) return json(res, 404, { error: 'unknown session' })
+      if (req.method === 'GET' && !sessionMatch[2]) {
+        return json(res, 200, { ...session, messageCount: session.messages.length })
+      }
+      if (req.method === 'POST' && sessionMatch[3] === 'messages') {
+        const body = await readJSON(req)
+        if (!body.text) return json(res, 400, { error: 'text is required' })
+        if (session.status !== 'ready') return json(res, 409, { error: `session is ${session.status}` })
+        session.messages.push({ at: new Date().toISOString(), role: 'user', text: body.text })
+        sendWS(devices.get(session.deviceId)?.ws, 'session.prompt', { sessionId: session.id, text: body.text })
+        persistSessions()
+        log(`session ${session.id} prompt (${body.text.length} chars)`)
+        return json(res, 200, { sessionId: session.id, status: session.status })
+      }
+      if (req.method === 'DELETE') {
+        session.status = 'closed'
+        sendWS(devices.get(session.deviceId)?.ws, 'session.close', { sessionId: session.id })
+        persistSessions()
+        return json(res, 200, { sessionId: session.id, status: session.status })
+      }
+      return json(res, 405, { error: 'method not allowed' })
     }
 
     if (route === 'POST /jobs') {
@@ -245,6 +373,36 @@ wss.on('connection', (ws, device) => {
         break
       case 'heartbeat':
         break
+      case 'session.opened': {
+        const session = sessions.get(payload.sessionId)
+        if (session) {
+          session.status = 'ready'
+          session.agentSession = payload.agentSession ?? null
+          session.directory = payload.directory || session.directory
+          persistSessions()
+        }
+        break
+      }
+      case 'session.prompted':
+        break
+      case 'session.failed': {
+        const session = sessions.get(payload.sessionId)
+        if (session) {
+          session.status = 'failed'
+          session.error = payload.error ?? 'session failed'
+          persistSessions()
+        }
+        break
+      }
+      case 'session.event': {
+        const session = sessions.get(payload.sessionId)
+        if (!session) break
+        const event = payload.event ?? {}
+        session.events.push(event)
+        if (session.events.length > 4000) session.events.splice(0, session.events.length - 4000)
+        applyEvent(session, event)
+        break
+      }
       case 'job.accept': {
         const job = jobs.get(payload.jobId)
         if (job) { job.status = 'running'; job.acceptedAt = new Date().toISOString(); persistJobs() }

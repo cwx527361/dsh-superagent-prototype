@@ -25,6 +25,8 @@ class Runner:
         self.log = log
         self.tasks: dict[str, asyncio.Task[None]] = {}
         self.sessions: dict[str, str] = {}
+        # Live chat sessions: hub sessionId -> {agentSession, oc, pump}
+        self.live: dict[str, dict[str, Any]] = {}
         self.version = "0.1.0"
 
     @property
@@ -110,6 +112,12 @@ class Runner:
             session_id = self.sessions.get(job_id)
             if session_id and text:
                 asyncio.create_task(self._steer(ws, job_id, session_id, text))
+        elif kind == "session.open":
+            asyncio.create_task(self._session_open(ws, payload))
+        elif kind == "session.prompt":
+            asyncio.create_task(self._session_prompt(ws, payload))
+        elif kind == "session.close":
+            asyncio.create_task(self._session_close(payload))
         elif kind == "job.cancel":
             task = self.tasks.get(payload.get("jobId") or "")
             if task:
@@ -165,8 +173,81 @@ class Runner:
         )
 
 
+    # --- live chat sessions ------------------------------------------------
+    #
+    # A session is not a job: it stays open, the person sends turn after turn,
+    # and every event opencode produces for it travels to the hub. That is what
+    # lets the panel show the whole conversation, including tool calls and their
+    # output, instead of only a final summary.
+
+    async def _session_open(self, ws: Any, payload: dict[str, Any]) -> None:
+        session_id = payload.get("sessionId") or ""
+        directory = payload.get("directory") or ""
+        model = payload.get("model") or ""
+        oc = Opencode(self.cfg.opencode_url, self.cfg.opencode_password)
+        try:
+            agent_session = (await oc.create_session(directory, model))["id"]
+        except Exception as err:  # noqa: BLE001
+            await self._send(ws, protocol.frame("session.failed", {"sessionId": session_id, "error": str(err)}))
+            return
+        self.live[session_id] = {"agentSession": agent_session, "oc": oc, "pump": None}
+        pump = asyncio.create_task(self._session_events(ws, session_id, agent_session, oc))
+        self.live[session_id]["pump"] = pump
+        self.log(f"[session] open {session_id} -> {agent_session} in {directory}")
+        await self._send(ws, protocol.frame("session.opened", {
+            "sessionId": session_id, "agentSession": agent_session, "directory": directory,
+        }))
+
+    async def _session_events(self, ws: Any, session_id: str, agent_session: str, oc: Opencode) -> None:
+        try:
+            async for event in oc.events():
+                data = event.get("data") or {}
+                if data.get("sessionID") != agent_session:
+                    continue
+                await self._send(ws, protocol.frame("session.event", {
+                    "sessionId": session_id, "event": {
+                        "type": event.get("type"), "data": data, "at": event.get("created"),
+                    },
+                }))
+        except asyncio.CancelledError:
+            raise
+        except Exception as err:  # noqa: BLE001 - the pump must not kill the runner
+            self.log(f"[session {session_id}] event stream ended: {err}")
+
+    async def _session_prompt(self, ws: Any, payload: dict[str, Any]) -> None:
+        session_id = payload.get("sessionId") or ""
+        state = self.live.get(session_id)
+        if state is None:
+            await self._send(ws, protocol.frame("session.failed", {
+                "sessionId": session_id, "error": "no such session on this runner",
+            }))
+            return
+        try:
+            await state["oc"].prompt(state["agentSession"], payload.get("text") or "")
+        except Exception as err:  # noqa: BLE001
+            await self._send(ws, protocol.frame("session.failed", {"sessionId": session_id, "error": str(err)}))
+            return
+        await self._send(ws, protocol.frame("session.prompted", {"sessionId": session_id}))
+
+    async def _session_close(self, payload: dict[str, Any]) -> None:
+        session_id = payload.get("sessionId") or ""
+        state = self.live.pop(session_id, None)
+        if state is None:
+            return
+        pump = state.get("pump")
+        if pump:
+            pump.cancel()
+        try:
+            await state["oc"].abort(state["agentSession"])
+        except Exception:  # noqa: BLE001 - closing is best effort
+            pass
+        self.log(f"[session] close {session_id}")
+
+
 def logger() -> Log:
     def log(message: str) -> None:
         print(message, file=sys.stderr, flush=True)
 
     return log
+
+
