@@ -1,0 +1,19 @@
+# Machine configuration of the container's `superagent` profile.
+# See docs/006-deployment.md, "Machine configuration".
+#
+# dsh-superagent refuses to manage a non-loopback Web server, so the harness
+# binds 127.0.0.1:3082 inside the container. The entrypoint runs a tiny TCP
+# forwarder on 0.0.0.0:3080 -> 127.0.0.1:3082 and docker publishes host
+# 127.0.0.1:3082 to it: browse the management API as http://127.0.0.1:3082, and
+# keep the request's Host header unchanged so the same-origin check passes.
+- id: webserver
+  config:
+    host: 127.0.0.1
+    port: 3082
+- id: dsh-superagent
+  config:
+    stateDir: /home/dsh/.dsh/state/superagent
+# Feishu is optional: uncomment to enable its Source, then set the bot's lark-cli
+# on the Feishu Source. The image deliberately does not install lark-cli.
+# - id: dsh-superagent-feishu
+#   disabled: false

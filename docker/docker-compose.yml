@@ -1,0 +1,31 @@
+name: dsh-superagent
+
+services:
+  superagent:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: dsh-superagent:local
+    container_name: dsh-superagent
+    restart: unless-stopped
+    ports:
+      # Host 127.0.0.1:3082 -> the entrypoint's socat bridge on container 3080,
+      # which forwards to the loopback-only harness on 127.0.0.1:3082.
+      - "127.0.0.1:3082:3080"
+    volumes:
+      # DSH_HOME: profile, credentials, stateDir database, gh-agent credentials.
+      - dsh-home:/home/dsh/.dsh
+      # Executor directory root; each Ticket gets its own checkout here.
+      - dsh-work:/home/dsh/work
+    environment:
+      TZ: Asia/Shanghai
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/dsh-superagent-healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 180s
+
+volumes:
+  dsh-home:
+  dsh-work:
