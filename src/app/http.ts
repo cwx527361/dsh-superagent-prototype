@@ -23,7 +23,6 @@ import type { TextCache } from './cache.ts'
 import type { LinkTarget, ViewHost } from './views/records.ts'
 import type { Variable } from './execution-environment.ts'
 import { policyHistory } from './settings-history.ts'
-import { getHubSession, getHubSessionEvents, listSessions, openHubSession, sendHubMessage } from './hub-sessions.ts'
 import { overview } from './views/overview.ts'
 import { settingsView } from './views/settings.ts'
 import { sourcesStatus, type SetupState } from './views/sources.ts'
@@ -159,15 +158,6 @@ function routes(runtime: HttpHost): Routes {
   return {
     'GET state': () => stateView(runtime),
     // Only a remote executor has a runner side to report; the in-container executor answers null.
-    'GET sessions': () => listSessions(),
-    'POST sessions': async ({ body }) => {
-      const request = await body() as { agent?: string; directory?: string; model?: string; title?: string }
-      // An empty directory means "the checkout this deployment works in", which the runner already knows.
-      return openHubSession({ ...request, directory: request.directory?.trim() || process.env.DSH_REMOTE_REPO_DIR })
-    },
-    'GET sessions/:id': ({ params }) => getHubSession(params.id),
-    'GET sessions/:id/events': ({ params, query }) => getHubSessionEvents(params.id, Number(query.tail) || 200),
-    'POST sessions/:id/messages': async ({ params, body }) => sendHubMessage(params.id, (await body() as { text: string }).text),
     'GET remote': async () => {
       const status = (runtime.executor as { status?: () => Promise<RemoteStatus> }).status
       return status ? await status.call(runtime.executor) : null

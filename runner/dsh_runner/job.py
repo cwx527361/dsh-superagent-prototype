@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
-from . import drivers
+from . import drivers, expert
 from .opencode import Opencode, OpencodeError
 
 Emit = Callable[[str, dict[str, Any]], Awaitable[None]]
@@ -83,6 +83,11 @@ async def cleanup_worktree(spec: dict[str, Any], worktree: str, keep: bool, log:
         log(f"[warn] worktree remove: {out}")
 
 
+def _expert_id(spec: dict[str, Any]) -> str | None:
+    profile = spec.get("expert")
+    return profile.get("id") if isinstance(profile, dict) else None
+
+
 async def git_result(worktree: str, base_sha: str) -> tuple[str, str, str]:
     _, branch = await git("rev-parse", "--abbrev-ref", "HEAD", cwd=worktree)
     _, commit = await git("rev-parse", "HEAD", cwd=worktree)
@@ -130,7 +135,8 @@ async def run_job(
         async with asyncio.timeout(timeout):
             await emit("status", {"phase": "workspace"})
             worktree, base_sha = await prepare_worktree(spec)
-            log(f"[job {job_id}] worktree {worktree}")
+            carrier = expert.materialize(worktree, spec)
+            log(f"[job {job_id}] worktree {worktree}" + (f" (expert {carrier})" if carrier else ""))
             await emit("status", {"phase": "running", "worktree": worktree})
 
             try:
@@ -181,6 +187,7 @@ async def run_job(
             log(f"[job {job_id}] done: {branch} {commit}")
             await emit("status", {"phase": "done", "commit": commit})
             return {
+                "expert": _expert_id(spec),
                 "branch": branch,
                 "commit": commit,
                 "diffstat": diffstat,
@@ -215,6 +222,7 @@ async def cli_job(spec: dict[str, Any], agent: str, emit: Emit, log: Log) -> dic
         async with asyncio.timeout(timeout):
             await emit("status", {"phase": "workspace"})
             worktree, base_sha = await prepare_worktree(spec)
+            expert.materialize(worktree, spec)
             log(f"[job {job_id}] worktree {worktree} via {agent}")
             await emit("status", {"phase": "running", "worktree": worktree, "agent": agent})
 
@@ -250,7 +258,7 @@ async def cli_job(spec: dict[str, Any], agent: str, emit: Emit, log: Log) -> dic
             await cleanup_worktree(spec, worktree, keep=False, log=log)
             log(f"[job {job_id}] done: {branch} {commit}")
             await emit("status", {"phase": "done", "commit": commit})
-            return {"branch": branch, "commit": commit, "diffstat": diffstat,
+            return {"expert": _expert_id(spec), "branch": branch, "commit": commit, "diffstat": diffstat,
                     "summary": tail[-1] if tail else f"{agent} finished"}
     except TimeoutError as err:
         raise JobError("timeout", f"job exceeded {timeout:.0f}s") from err

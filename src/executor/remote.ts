@@ -51,7 +51,7 @@ export class HubClient {
   constructor(private readonly options: HubOptions) {}
 
   /** POSTs a job and returns its id; throws when the hub rejects it (such as when no runner is online). */
-  async submit(body: { ticket: string; prompt: string; branch?: string; timeoutMs?: number; agent?: string; model?: string }): Promise<string> {
+  async submit(body: { ticket: string; prompt: string; branch?: string; timeoutMs?: number; agent?: string; model?: string; expert?: unknown }): Promise<string> {
     const response = await this.call('/jobs', 'POST', {
       ticket: body.ticket,
       prompt: body.prompt,
@@ -59,6 +59,7 @@ export class HubClient {
       ...body.timeoutMs ? { timeoutMs: body.timeoutMs } : {},
       ...body.agent ? { agent: body.agent } : {},
       ...body.model ? { model: body.model } : {},
+      ...body.expert ? { expert: body.expert } : {},
       repo: { dir: this.options.repoDir ?? '', gitUrl: this.options.repoUrl ?? '' },
       ...this.options.base ? { base: this.options.base } : {},
       ...this.options.model ? { model: this.options.model } : {},
@@ -269,9 +270,9 @@ export class RemoteExecutor implements Executor {
     const job = this.jobs.get(ticket.id)!
     try {
       this.host.engine.assignmentStarted(ticket.id, assignment.id)
-      const { agent, agentModel } = this.host.store.settings().executor
+      const { agent, agentModel, expert } = this.host.store.settings().executor
       job.jobId = await this.client.submit({ ticket: ticket.id, prompt: this.prompt(ticket), branch: `feat/${ticket.id}`,
-        ...agent ? { agent } : {}, ...agentModel ? { model: agentModel } : {} })
+        ...agent ? { agent } : {}, ...agentModel ? { model: agentModel } : {}, ...expert ? { expert } : {} })
       this.views.set(ticket.id, { jobId: job.jobId, state: 'offered', startedAt: new Date().toISOString(), lines: [] })
       job.markReady()
       const terminal = await this.wait(job.jobId, abort.signal, ticket.id)

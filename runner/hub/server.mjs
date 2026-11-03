@@ -4,7 +4,7 @@
 //   POST /runner/oauth/start   (501 in the POC: the company SSO wiring is next)
 //   POST /runner/oauth/exchange
 //   GET  /health
-//   POST /jobs                 {ticket, repo:{dir,gitUrl}, base, branch, prompt, model, agent?, timeoutMs, deviceId?}
+//   POST /jobs                 {ticket, repo:{dir,gitUrl}, base, branch, prompt, model, agent?, expert?, timeoutMs, deviceId?}
 //   GET  /jobs                 list
 //   GET  /jobs/:id             state + events + result
 //   POST /jobs/:id/cancel      {reason}
@@ -310,6 +310,9 @@ const server = http.createServer(async (req, res) => {
         timeoutMs: Number(body.timeoutMs) || 30 * 60 * 1000,
         worktree: { dir: body.worktree?.dir ?? '' },
       }
+      // Who does the task travels with the task: the worker applies the expert
+      // definition inside its own worktree instead of trusting local defaults.
+      if (body.expert && typeof body.expert === 'object') spec.expert = body.expert
       const entry = (device.agents ?? []).find((a) => a.id === agent)
       if (entry?.path) spec.agentPath = entry.path
       if (!spec.prompt) return json(res, 400, { error: 'prompt is required' })
@@ -447,7 +450,7 @@ wss.on('connection', (ws, device) => {
         const job = jobs.get(payload.jobId)
         if (job) {
           job.status = 'succeeded'; job.finishedAt = new Date().toISOString()
-          job.result = { branch: payload.branch, commit: payload.commit, diffstat: payload.diffstat, summary: payload.summary }
+          job.result = { branch: payload.branch, commit: payload.commit, diffstat: payload.diffstat, summary: payload.summary, expert: payload.expert ?? job.spec.expert?.id ?? null }
           persistJobs()
           log(`job ${job.id} succeeded (${payload.branch} ${payload.commit})`)
         }

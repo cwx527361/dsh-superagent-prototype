@@ -88,6 +88,16 @@ export const EvalConfigSchema = z.object({
 const CommandNameSchema = z.string().regex(/^[A-Za-z0-9._-]+$/).refine(name => name !== '.' && name !== '..', 'Not a command name')
   .refine(name => !WORKER_COMMANDS.includes(name), `${WORKER_COMMANDS.join(', ')} cannot be blocked`)
 /** Executor settings: worker model, concurrency, ticket directory root (empty defaults to `<stateDir>/work`), `prepare` command, and blocked commands. */
+export const ExpertSchema = z.object({
+  id: z.string().trim().min(1).max(80),
+  name: z.string().trim().max(120).default(''),
+  role: z.string().trim().max(120).default(''),
+  version: z.string().trim().max(40).default(''),
+  instructions: z.string().max(20000).default(''),
+  skills: z.array(z.string().trim().max(200)).max(30).default([]),
+  tools: z.array(z.string().trim().max(200)).max(30).default([]),
+  guardrails: z.array(z.string().trim().max(300)).max(30).default([]),
+}).strict()
 export const ExecutorConfigSchema = z.object({
   model: RoleModelSchema.nullable().default(null),
   maxWorkers: z.number().int().min(LIMITS.maxWorkers.min).max(LIMITS.maxWorkers.max).default(3),
@@ -96,6 +106,9 @@ export const ExecutorConfigSchema = z.object({
   agent: z.string().trim().max(40).default('opencode'),
   agentModel: z.string().trim().max(120).default(''),
   blockedCommands: z.array(CommandNameSchema).default([]),
+  // Who does the work: the expert definition travels with every dispatched job, so a
+  // worker never silently runs with whatever defaults its machine happens to have.
+  expert: ExpertSchema.nullable().default(null),
 }).strict()
 export const SourceInstanceSchema = z.object({ enabled: z.boolean().default(true), config: z.record(z.string(), z.unknown()).default({}) }).strict()
 export const SettingsSchema = z.object({

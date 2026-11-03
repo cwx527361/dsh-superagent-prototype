@@ -3,7 +3,6 @@ import type { ModelCatalog } from '@deepseek-ai/dsh-api-session-controller/types
 import type { PromptConfig, Prompts } from './prompts.ts'
 import type { PromptsView, StateView, TicketPageView } from './http.ts'
 import type { RemoteStatus } from '../executor/remote.ts'
-import type { SessionEvent, SessionView, SessionsView } from './hub-sessions.ts'
 import type { HistoryView } from './settings-history.ts'
 import type { OverviewView } from './views/overview.ts'
 import type { SettingsView } from './views/settings.ts'
@@ -22,11 +21,6 @@ type Delivery = 'injected' | 'pending'
 export interface Api {
   'GET state': { response: StateView }
   'GET remote': { response: RemoteStatus | null }
-  'GET sessions': { response: SessionsView | null }
-  'POST sessions': { body: { agent?: string; directory?: string; model?: string; title?: string }; response: { sessionId: string; deviceId: string; status: string } }
-  'GET sessions/:id': { response: SessionView }
-  'GET sessions/:id/events': { query?: { tail?: number }; response: { sessionId: string; count: number; events: SessionEvent[] } }
-  'POST sessions/:id/messages': { body: { text: string }; response: { sessionId: string; status: string } }
   'GET overview': { response: OverviewView }
   'GET search': { query: { q: string }; response: SearchView }
   'GET sources': { response: SourceStatusView[] }
