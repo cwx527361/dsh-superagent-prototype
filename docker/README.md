@@ -221,7 +221,14 @@ what actually happened — text, reasoning (collapsed), each tool call with its
 input and output, per-step tokens and cost.
 
 This surface is backed by the hub's `/sessions` API, so it works from the cloud
-container while the work happens on the laptop. The harness's own chat composer
-still selects agent presets from the harness, not from this list; wiring the
-local agent in there needs a dedicated agent-loop plugin (see
-`platform-design/local-runner-cli.md`).
+container while the work happens on the laptop.
+
+The harness's own chat can use the runner too: with `DSH_REMOTE_HUB` set the
+plugin registers an `llm` adapter for the `opencode` provider, so the composer's
+model picker lists every model the runner reported under **本地智能体 (runner)**.
+Selecting one keeps the harness's normal loop, session log, and rendering — the
+adapter only forwards the newest user turn to a live opencode session and
+streams its reasoning and text back, so the chat looks native while tools and
+edits happen on the person's machine. opencode's tool calls appear as inline
+`▸ tool · status` lines rather than harness tool cards: the tools belong to the
+local agent, not to this harness.
