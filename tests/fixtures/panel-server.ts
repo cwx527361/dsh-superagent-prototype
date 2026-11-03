@@ -294,6 +294,7 @@ const ROUTES: { [K in keyof Api]: Route<K> } = {
   'GET state': { answer: stateView },
   'GET remote': { answer: () => null },
   'GET sessions': { answer: () => null },
+  'GET sessions/:id/events': { query: ['tail'], answer: ({ params }) => ({ sessionId: params.id, count: 0, events: [] }) },
   'POST sessions': { body: true, answer: () => ({ sessionId: 'sess_fixture', deviceId: 'dev_fixture', status: 'opening' }) },
   'GET sessions/:id': { answer: () => ({
     id: 'sess_fixture', agent: 'opencode', deviceId: 'dev_fixture', title: '', status: 'ready',

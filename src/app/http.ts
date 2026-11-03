@@ -23,7 +23,7 @@ import type { TextCache } from './cache.ts'
 import type { LinkTarget, ViewHost } from './views/records.ts'
 import type { Variable } from './execution-environment.ts'
 import { policyHistory } from './settings-history.ts'
-import { getHubSession, listSessions, openHubSession, sendHubMessage } from './hub-sessions.ts'
+import { getHubSession, getHubSessionEvents, listSessions, openHubSession, sendHubMessage } from './hub-sessions.ts'
 import { overview } from './views/overview.ts'
 import { settingsView } from './views/settings.ts'
 import { sourcesStatus, type SetupState } from './views/sources.ts'
@@ -166,6 +166,7 @@ function routes(runtime: HttpHost): Routes {
       return openHubSession({ ...request, directory: request.directory?.trim() || process.env.DSH_REMOTE_REPO_DIR })
     },
     'GET sessions/:id': ({ params }) => getHubSession(params.id),
+    'GET sessions/:id/events': ({ params, query }) => getHubSessionEvents(params.id, Number(query.tail) || 200),
     'POST sessions/:id/messages': async ({ params, body }) => sendHubMessage(params.id, (await body() as { text: string }).text),
     'GET remote': async () => {
       const status = (runtime.executor as { status?: () => Promise<RemoteStatus> }).status

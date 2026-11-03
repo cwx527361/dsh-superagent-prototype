@@ -14,6 +14,9 @@ export interface SessionPart {
   tokens?: { input?: number; output?: number; reasoning?: number }
 }
 
+/** One raw event the runner forwarded from the agent, kept for the trace view. */
+export interface SessionEvent { at?: string; type?: string; event?: { type?: string; data?: unknown; at?: string } }
+
 export interface SessionMessage { at: string; role: 'user' | 'assistant'; text: string }
 export interface SessionView {
   id: string
@@ -60,6 +63,10 @@ export const openHubSession = (body: { agent?: string; directory?: string; model
   hub<{ sessionId: string; deviceId: string; status: string }>('/sessions', { method: 'POST', body: JSON.stringify(body) })
 
 export const getHubSession = (id: string) => hub<SessionView>(`/sessions/${encodeURIComponent(id)}`)
+
+export const getHubSessionEvents = (id: string, tail = 200) =>
+  hub<{ sessionId: string; count: number; events: SessionEvent[] }>(
+    `/sessions/${encodeURIComponent(id)}/events?tail=${tail}`)
 
 export const sendHubMessage = (id: string, text: string) =>
   hub<{ sessionId: string; status: string }>(`/sessions/${encodeURIComponent(id)}/messages`,

@@ -51,9 +51,20 @@ const persistDevices = () => save('devices.json', Object.fromEntries(
 // Live chat sessions: hub sessionId -> transcript, relayed from the runner's
 // opencode event stream. Unlike a job these stay open across turns.
 const sessions = new Map()
+// Reload transcripts so the trace survives a hub restart; a live session cannot be
+// resumed across a restart, so it comes back closed but readable.
+for (const [id, session] of Object.entries(load('sessions.json', {}))) {
+  sessions.set(id, { ...session, status: session.status === 'ready' ? 'closed' : session.status, deviceWs: null })
+}
 const persistSessions = () => save('sessions.json', Object.fromEntries(
   [...sessions].map(([id, s]) => [id, { ...s, deviceWs: undefined }]),
 ))
+
+// Sessions change on every streamed token; persist them on a short timer instead of
+// per event, and immediately when a turn ends.
+let sessionsDirty = false
+const markSessions = () => { sessionsDirty = true }
+setInterval(() => { if (sessionsDirty) { sessionsDirty = false; persistSessions() } }, 2000).unref?.()
 
 const persistJobs = () => save('jobs.json', Object.fromEntries(
   [...jobs].map(([id, j]) => [id, { ...j, spec: j.spec, events: j.events }]),
@@ -241,6 +252,14 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { sessions: list.reverse() })
     }
 
+    const eventsMatch = url.pathname.match(/^\/sessions\/([^/]+)\/events$/)
+    if (eventsMatch) {
+      const session = sessions.get(eventsMatch[1])
+      if (!session) return json(res, 404, { error: 'unknown session' })
+      const tail = Math.min(Math.max(Number(url.searchParams.get('tail')) || 200, 1), 4000)
+      return json(res, 200, { sessionId: session.id, count: session.events.length, events: session.events.slice(-tail) })
+    }
+
     const sessionMatch = url.pathname.match(/^\/sessions\/([^/]+)(\/(messages))?$/)
     if (sessionMatch) {
       const session = sessions.get(sessionMatch[1])
@@ -410,6 +429,8 @@ wss.on('connection', (ws, device) => {
         session.events.push(event)
         if (session.events.length > 4000) session.events.splice(0, session.events.length - 4000)
         applyEvent(session, event)
+        markSessions()
+        if (String(event.type ?? '').startsWith('session.execution.')) persistSessions()
         break
       }
       case 'job.accept': {
