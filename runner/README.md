@@ -122,6 +122,28 @@ answers `503 no runner online can drive <agent>` otherwise. Today only
 `opencode` has a driver; a job asking for anything else fails with
 `agent_unsupported` rather than silently running something else.
 
+## Drivers: picking an agent activates it
+
+`dsh_runner/drivers.py` is the whole activation mechanism: a table mapping an
+agent id to *how* it runs (an HTTP server, or a one-shot CLI command plus how to
+pass a model). A tool is drivable exactly when this table has an entry for it,
+so:
+
+- detection + driver entry = selectable in the panel, no per-tool code in the
+  job pipeline (the shared `cli_job` streams stdout as events and commits what
+  the agent left behind, so every tool yields branch + commit + diffstat);
+- detection without an entry = reported but shown as （未接入）, and a job for
+  it fails as `agent_unsupported` rather than running something else;
+- adding a tool = one probe + one table entry, shipped with the next runner
+  release; the cloud needs no change, because the panel reads the driver flag
+  out of `hello.agents`.
+
+That is also why "choose it in the cloud" works without a separate activation
+call: the moment a runner reports `driver: "codex"`, the panel offers it, and
+choosing it makes the next job run through that descriptor. Current entries:
+`opencode` (http), `codex`, `claude`, `gemini`, `dsh` (cli). DeepSeek Harness,
+WorkBuddy and CodeBuddy are desktop apps with no CLI, so they stay detected.
+
 ## Job lifecycle
 
 1. Hub sends `job.offer` with a `JobSpec` (repo dir or clone URL, base, ticket,

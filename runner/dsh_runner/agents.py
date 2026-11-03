@@ -20,6 +20,8 @@ from pathlib import Path
 import urllib.request
 from typing import Any
 
+from . import drivers
+
 # (id, binary, driver). driver=None means "detected, but this runner has no adapter yet".
 CANDIDATES: tuple[tuple[str, str, str | None], ...] = (
     ("opencode", "opencode", "opencode"),
@@ -132,10 +134,12 @@ async def detect_async(opencode_url: str = "", opencode_password: str = "") -> l
 def detect() -> list[dict[str, Any]]:
     """Every known agent binary on PATH, with its version and the driver that can run it."""
     found: list[dict[str, Any]] = []
-    for agent_id, binary, driver in CANDIDATES:
+    for agent_id, binary, _declared in CANDIDATES:
         path = _locate(binary)
         if not path:
             continue
+        # drivable iff the runner has a driver entry; detection alone is not enough.
+        driver = agent_id if drivers.driver_for(agent_id) else None
         found.append({"id": agent_id, "name": binary, "path": path, "kind": "cli",
                       "version": version_of(path), "driver": driver, "models": []})
     found.extend(_apps())

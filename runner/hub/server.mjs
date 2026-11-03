@@ -154,6 +154,8 @@ const server = http.createServer(async (req, res) => {
         timeoutMs: Number(body.timeoutMs) || 30 * 60 * 1000,
         worktree: { dir: body.worktree?.dir ?? '' },
       }
+      const entry = (device.agents ?? []).find((a) => a.id === agent)
+      if (entry?.path) spec.agentPath = entry.path
       if (!spec.prompt) return json(res, 400, { error: 'prompt is required' })
       const job = { id: jobId, spec, deviceId: device.id, status: 'offered', createdAt: new Date().toISOString(), acceptedAt: null, finishedAt: null, events: [], inputs: [], result: null, failure: null }
       jobs.set(jobId, job)

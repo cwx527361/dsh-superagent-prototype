@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
+from . import drivers
 from .opencode import Opencode, OpencodeError
 
 Emit = Callable[[str, dict[str, Any]], Awaitable[None]]
@@ -116,8 +117,11 @@ async def run_job(
     """Execute one job; raises JobError on failure (caller frames job.failed)."""
     job_id = spec["jobId"]
     agent = spec.get("agent") or "opencode"
-    if agent != "opencode":
+    driver = drivers.driver_for(agent)
+    if driver is None:
         raise JobError("agent_unsupported", f"this runner cannot drive {agent} yet", retryable=False)
+    if driver["mode"] == "cli":
+        return await cli_job(spec, agent, emit, log)
     timeout = min(float(spec.get("timeoutMs") or JOB_TIMEOUT) / 1000.0, JOB_TIMEOUT)
     oc = Opencode(opencode_url, opencode_password)
     session_id = ""
@@ -187,6 +191,70 @@ async def run_job(
         raise JobError("timeout", f"job exceeded {timeout:.0f}s") from err
     except asyncio.CancelledError:
         await oc.abort(session_id)
+        raise JobError("cancelled", "job cancelled", retryable=False) from None
+    except JobError:
+        raise
+    except Exception as err:  # noqa: BLE001 - one bad job must not kill the runner
+        raise JobError("internal", str(err)) from err
+
+
+async def _commit(worktree: str, message: str) -> None:
+    """Commit whatever a CLI agent left behind, so every agent yields a commit."""
+    status, _ = await git("status", "--porcelain", cwd=worktree)
+    if not status.strip():
+        return
+    await git("add", "-A", cwd=worktree)
+    await git("-c", "user.name=dsh-runner", "-c", "user.email=runner@dsh.local", "commit", "-q", "-m", message, cwd=worktree)
+
+
+async def cli_job(spec: dict[str, Any], agent: str, emit: Emit, log: Log) -> dict[str, Any]:
+    """Run a one-shot CLI agent in the worktree and turn its output into events."""
+    job_id = spec["jobId"]
+    timeout = min(float(spec.get("timeoutMs") or JOB_TIMEOUT) / 1000.0, JOB_TIMEOUT)
+    try:
+        async with asyncio.timeout(timeout):
+            await emit("status", {"phase": "workspace"})
+            worktree, base_sha = await prepare_worktree(spec)
+            log(f"[job {job_id}] worktree {worktree} via {agent}")
+            await emit("status", {"phase": "running", "worktree": worktree, "agent": agent})
+
+            argv = drivers.command(agent, spec.get("agentPath") or "", worktree,
+                                   spec.get("prompt") or "", spec.get("model") or "")
+            log(f"[job {job_id}] {' '.join(argv[:2])}")
+            proc = await asyncio.create_subprocess_exec(
+                *argv, cwd=worktree, stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            )
+            tail: list[str] = []
+
+            async def pump(stream: Any, is_error: bool) -> None:
+                while True:
+                    raw = await stream.readline()
+                    if not raw:
+                        return
+                    line = raw.decode(errors="replace").rstrip()
+                    if not line:
+                        continue
+                    tail.append(line)
+                    del tail[:-40]
+                    if not is_error:
+                        await emit("log", {"role": "assistant", "text": line})
+
+            await asyncio.gather(pump(proc.stdout, False), pump(proc.stderr, True))
+            code = await proc.wait()
+            if code != 0:
+                raise JobError("agent_failed", f"{agent} exited {code}: " + " | ".join(tail[-3:]))
+
+            await _commit(worktree, f"feat({spec.get('ticket') or job_id}): work by {agent}")
+            branch, commit, diffstat = await git_result(worktree, base_sha)
+            await cleanup_worktree(spec, worktree, keep=False, log=log)
+            log(f"[job {job_id}] done: {branch} {commit}")
+            await emit("status", {"phase": "done", "commit": commit})
+            return {"branch": branch, "commit": commit, "diffstat": diffstat,
+                    "summary": tail[-1] if tail else f"{agent} finished"}
+    except TimeoutError as err:
+        raise JobError("timeout", f"job exceeded {timeout:.0f}s") from err
+    except asyncio.CancelledError:
         raise JobError("cancelled", "job cancelled", retryable=False) from None
     except JobError:
         raise
