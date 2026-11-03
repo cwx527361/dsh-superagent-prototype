@@ -142,5 +142,14 @@ def detect() -> list[dict[str, Any]]:
         driver = agent_id if drivers.driver_for(agent_id) else None
         found.append({"id": agent_id, "name": binary, "path": path, "kind": "cli",
                       "version": version_of(path), "driver": driver, "models": []})
+    # Custom drivers are explicit: probe their binary and report them as drivable.
+    for agent_id, entry in drivers.CUSTOM.items():
+        path = _locate(entry["argv"][0])
+        if not path:
+            continue
+        models = [{"id": model, "name": model.split("/", 1)[-1], "provider": model.split("/", 1)[0]}
+                  for model in entry.get("models") or []]
+        found.append({"id": agent_id, "name": entry["argv"][0], "path": path, "kind": "cli",
+                      "version": version_of(path), "driver": agent_id, "models": models})
     found.extend(_apps())
     return found

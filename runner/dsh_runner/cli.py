@@ -21,8 +21,9 @@ from typing import Any
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
 
+from . import drivers
 from .client import Runner, logger
-from .config import Config, load_config, load_or_create, save_config, state_dir
+from .config import Config, config_path, load_config, load_or_create, save_config, state_dir
 from .opencode import Opencode, OpencodeError
 
 try:  # installed wheel: report the published version
@@ -135,6 +136,21 @@ def _oauth(cfg: Config) -> dict[str, Any]:
     )
 
 
+def cmd_drivers(_args: argparse.Namespace) -> int:
+    cfg = load_config()
+    problems = drivers.configure(cfg.drivers)
+    for problem in problems:
+        print(f"[warn] custom driver ignored: {problem}", file=sys.stderr)
+    rows = []
+    for agent, entry in drivers.all_drivers().items():
+        where = "custom" if entry.get("custom") else "built-in"
+        rows.append({"id": agent, "where": where, "command": drivers.describe(agent)})
+    print(json.dumps(rows, indent=2))
+    print(f"\nadd one to {config_path()} under \"drivers\": "
+          '{"my-agent": {"command": "my-agent", "args": ["--cwd", "{dir}", "{prompt}"]}}', file=sys.stderr)
+    return 0
+
+
 def cmd_start(args: argparse.Namespace) -> int:
     cfg = load_config()
     cfg.apply_env()
@@ -144,6 +160,8 @@ def cmd_start(args: argparse.Namespace) -> int:
         cfg.opencode_url = args.opencode_url
     if not cfg.server or not cfg.device_token:
         raise SystemExit("not logged in: run `dsh-runner login --server <url> --token <token>` first")
+    for problem in drivers.configure(cfg.drivers):
+        print(f"[warn] custom driver ignored: {problem}", file=sys.stderr)
 
     async def main() -> None:
         stop = asyncio.Event()
@@ -264,6 +282,9 @@ def build_parser() -> argparse.ArgumentParser:
     start.add_argument("--server", default="")
     start.add_argument("--opencode-url", default="")
     start.set_defaults(func=cmd_start)
+
+    drivers_cmd = sub.add_parser("drivers", help="list built-in and custom agent drivers")
+    drivers_cmd.set_defaults(func=cmd_drivers)
 
     status = sub.add_parser("status", help="show configuration and hub health")
     status.set_defaults(func=cmd_status)

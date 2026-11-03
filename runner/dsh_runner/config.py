@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+from typing import Any
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -38,6 +39,8 @@ class Config:
     workspace_root: str = field(default_factory=_home_workdir)
     opencode_url: str = "http://127.0.0.1:4097"
     opencode_password: str = ""
+    # Custom drivers (id -> {command, args, modelArgs, versionArgs}); see drivers.py.
+    drivers: dict[str, Any] = field(default_factory=dict)
 
     @property
     def max_concurrency(self) -> int:
@@ -84,6 +87,7 @@ def load_config() -> Config:
         workspace_root=raw.get("workspaceRoot") or _home_workdir(),
         opencode_url=raw.get("opencodeUrl") or "http://127.0.0.1:4097",
         opencode_password=raw.get("opencodePassword", ""),
+        drivers=raw.get("drivers") or {},
     )
     cfg.ensure_key()
     return cfg
@@ -103,6 +107,7 @@ def save_config(cfg: Config) -> None:
         "workspaceRoot": cfg.workspace_root,
         "opencodeUrl": cfg.opencode_url,
         "opencodePassword": cfg.opencode_password,
+        "drivers": cfg.drivers,
     }
     path.write_text(json.dumps(payload, indent=2) + "\n")
     os.chmod(path, 0o600)

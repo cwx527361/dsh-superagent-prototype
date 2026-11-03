@@ -200,8 +200,8 @@ async def run_job(
 
 async def _commit(worktree: str, message: str) -> None:
     """Commit whatever a CLI agent left behind, so every agent yields a commit."""
-    status, _ = await git("status", "--porcelain", cwd=worktree)
-    if not status.strip():
+    _code, out = await git("status", "--porcelain", cwd=worktree)
+    if not out.strip():
         return
     await git("add", "-A", cwd=worktree)
     await git("-c", "user.name=dsh-runner", "-c", "user.email=runner@dsh.local", "commit", "-q", "-m", message, cwd=worktree)

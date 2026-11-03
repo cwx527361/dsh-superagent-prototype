@@ -138,6 +138,34 @@ so:
   release; the cloud needs no change, because the panel reads the driver flag
   out of `hello.agents`.
 
+### Adding your own tool (no release needed)
+
+Put an entry under `drivers` in `~/.dsh-runner/config.json`; the next start
+picks it up, reports it, and the panel offers it like a built-in:
+
+```json
+{
+  "drivers": {
+    "my-agent": {
+      "command": "my-agent",
+      "args": ["exec", "--cwd", "{dir}", "{prompt}"],
+      "modelArgs": ["--model", "{model}"],
+      "models": ["vendor/model-a", "vendor/model-b"],
+      "versionArgs": ["--version"]
+    }
+  }
+}
+```
+
+- `{dir}` = the job's worktree, `{prompt}` = the ticket prompt (both are
+  substituted per job); `modelArgs` is appended only when a model is chosen.
+- `models` is optional: list the ids your tool accepts and the panel's model
+  picker shows them; omit it for "agent default only".
+- `dsh-runner drivers` prints the merged table (built-in + custom) and the
+  config path; a malformed entry is reported at start and skipped.
+- The same pipeline applies: stdout lines stream as events, the runner commits
+  whatever the tool left behind, and the result is branch + commit + diffstat.
+
 That is also why "choose it in the cloud" works without a separate activation
 call: the moment a runner reports `driver: "codex"`, the panel offers it, and
 choosing it makes the next job run through that descriptor. Current entries:
