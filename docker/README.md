@@ -95,6 +95,29 @@ the image:
 3. **Sources and settings** — the rest (repositories, review policy, model
    settings) is edited in the panel and persisted in the volume.
 
+## Calling a local opencode (POC)
+
+The container can call an opencode server running on the host, which is how the
+platform is meant to reach a developer's own machine:
+
+```bash
+# host: a writable data dir (the file sandbox denies ~/.local/share/opencode)
+export XDG_DATA_HOME=$PWD/.poc/xdg/data XDG_CACHE_HOME=$PWD/.poc/xdg/cache XDG_STATE_HOME=$PWD/.poc/xdg/state
+opencode serve --hostname 0.0.0.0 --port 4097 --print-logs   # prints "server password <PW>"
+
+export OPENCODE_PASSWORD=<PW>
+docker compose -f docker/docker-compose.yml up -d --build
+
+docker compose -f docker/docker-compose.yml exec -T \
+  -e OPENCODE_DIRECTORY=/absolute/host/path/to/repo \
+  -e PROMPT='Create POC2.md with one line: hello from cloud. Then commit it.' \
+  superagent node /opt/poc/dispatch.mjs
+```
+
+Details, API shape, and results: `docker/poc/README.md`. POC only: the server
+listens on every interface with one shared password; production needs a
+per-runner token over loopback/tunnel.
+
 ## Volumes and lifecycle
 
 | Volume     | Mount point       | Holds                                    |

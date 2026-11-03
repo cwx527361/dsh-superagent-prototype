@@ -83,6 +83,7 @@ ENV DSH_HOME=/home/dsh/.dsh \
     DSH_PROFILE=superagent \
     PATH=/home/dsh/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
+COPY docker/poc /opt/poc
 COPY docker/entrypoint.sh /usr/local/bin/dsh-superagent-entrypoint
 COPY docker/healthcheck.sh /usr/local/bin/dsh-superagent-healthcheck
 RUN chmod +x /usr/local/bin/dsh-superagent-entrypoint /usr/local/bin/dsh-superagent-healthcheck

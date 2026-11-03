@@ -19,6 +19,11 @@ services:
       - dsh-work:/home/dsh/work
     environment:
       TZ: Asia/Shanghai
+      # POC: the local opencode server runs on the host, outside this container.
+      OPENCODE_URL: ${OPENCODE_URL:-http://host.docker.internal:4097}
+      OPENCODE_PASSWORD: ${OPENCODE_PASSWORD:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     healthcheck:
       test: ["CMD", "/usr/local/bin/dsh-superagent-healthcheck"]
       interval: 30s
