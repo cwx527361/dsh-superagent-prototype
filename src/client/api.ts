@@ -133,6 +133,8 @@ export type DroppedReply = SourceStatusRow['dropped'][number]
 export type SearchView = ApiResponse<'GET search'>
 export type TicketSummary = SearchView['tickets'][number]
 export type { TicketStage }
+export type SessionView = ApiResponse<'GET sessions/:id'>
+export type SessionPart = SessionView['parts'][number]
 export type HistoryView = ApiResponse<'GET policy/history'>
 export type PromptsView = ApiResponse<'GET prompts'>
 export type PromptConfig = PromptsView['defaults']

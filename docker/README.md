@@ -210,3 +210,18 @@ docker compose -f docker/docker-compose.yml build --build-arg DSH_VERSION=0.2.1-
 - **Apple Silicon / colima** — the image builds for the host architecture; give
   the `colima` VM enough memory (16 GiB recommended) for the harness and the
   agent's TypeScript builds.
+
+## Chat with a local agent from the panel
+
+The panel's **对话 / Chat** tab runs a whole session on the runner instead of a
+one-shot job: pick the agent (anything the runner reported, `opencode` today),
+optionally a model and a working directory, then talk. Every turn is a message
+to `POST /orchestrator/api/... /sessions/:id/messages`, and the transcript shows
+what actually happened — text, reasoning (collapsed), each tool call with its
+input and output, per-step tokens and cost.
+
+This surface is backed by the hub's `/sessions` API, so it works from the cloud
+container while the work happens on the laptop. The harness's own chat composer
+still selects agent presets from the harness, not from this list; wiring the
+local agent in there needs a dedicated agent-loop plugin (see
+`platform-design/local-runner-cli.md`).

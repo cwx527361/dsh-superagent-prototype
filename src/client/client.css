@@ -380,3 +380,17 @@ a.dt-btn, a.dt-btn:hover { text-decoration: none; }
 .dt-admission-slot { display: inline-flex; flex: none; width: 16px; }
 .dt-info-warn { color: var(--dsw-alias-state-warn-primary); }
 .dt-field-segmented { max-width: 240px; }
+
+/* Chat tab: a plain reading column, tool cards keep their own frame. */
+.dt-transcript { display: flex; flex-direction: column; gap: 10px; margin: 14px 0; max-width: 860px; }
+.dt-msg { background: var(--dt-surface, #fff); border: 1px solid var(--dt-line, #e6e6e6); border-radius: 10px;
+  padding: 10px 14px; margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.dt-msg > p { margin: 0; }
+.dt-msg details > summary { cursor: pointer; color: var(--dt-muted, #6b6b6b); }
+.dt-tool { border: 1px solid var(--dt-line, #e6e6e6); border-radius: 10px; padding: 8px 12px;
+  background: var(--dt-surface-soft, #fafafa); }
+.dt-tool-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.dt-tool-io { margin: 6px 0 0; max-height: 240px; overflow: auto; white-space: pre-wrap; font-size: 12px; }
+.dt-composer { display: flex; gap: 10px; align-items: flex-end; max-width: 860px; margin-top: 10px; }
+.dt-composer textarea { flex: 1; resize: vertical; }
+.dt-step { font-size: 12px; color: var(--dt-muted, #6b6b6b); margin: 0; }

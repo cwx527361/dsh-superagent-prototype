@@ -171,6 +171,10 @@ function applyEvent(session, event) {
       finish: data.finish, cost: data.cost, tokens: data.tokens, at: new Date().toISOString() })
     return
   }
+  if (type === 'session.step.failed' || type === 'session.execution.failed') {
+    const error = data.error ?? {}
+    session.error = error.message ?? error.type ?? 'the agent failed'
+  }
   if (type === 'session.execution.succeeded' || type === 'session.execution.failed') {
     session.turn = { state: type.endsWith('succeeded') ? 'ready' : 'failed', at: new Date().toISOString() }
   }
@@ -220,7 +224,7 @@ const server = http.createServer(async (req, res) => {
       if (!device) return json(res, 503, { error: `no runner online can drive ${agent}` })
       const sessionId = `sess_${randomBytes(6).toString('hex')}`
       const session = {
-        id: sessionId, agent, deviceId: device.id, directory: body.directory ?? '', model: body.model ?? '',
+        id: sessionId, agent, deviceId: device.id, directory: body.directory ?? '', model: body.model || 'deepseek/deepseek-flash',
         title: body.title ?? '', status: 'opening', createdAt: new Date().toISOString(),
         agentSession: null, messages: [], events: [], parts: [],
       }
@@ -247,6 +251,11 @@ const server = http.createServer(async (req, res) => {
       if (req.method === 'POST' && sessionMatch[3] === 'messages') {
         const body = await readJSON(req)
         if (!body.text) return json(res, 400, { error: 'text is required' })
+        // A person often types the first message before the runner finished opening
+        // the session; wait for it instead of refusing the turn.
+        for (let waited = 0; session.status === 'opening' && waited < 10_000; waited += 100) {
+          await new Promise((resolve) => setTimeout(resolve, 100))
+        }
         if (session.status !== 'ready') return json(res, 409, { error: `session is ${session.status}` })
         session.messages.push({ at: new Date().toISOString(), role: 'user', text: body.text })
         sendWS(devices.get(session.deviceId)?.ws, 'session.prompt', { sessionId: session.id, text: body.text })
