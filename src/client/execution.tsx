@@ -29,7 +29,7 @@ function RemoteRunners() {
           <LabelValue label={t('executingLabel')} value={runner.running} /></div>
         <div className="dt-row-meta">{runner.agents.length > 0
           ? runner.agents.map(agent => <Tag key={agent.id} tone={agent.driver ? 'success' : 'neutral'}>
-            {agent.id}{agent.version ? ` ${agent.version}` : ''}</Tag>)
+            {agent.id}{agent.version ? ` ${agent.version}` : ''}{agent.models.length > 0 ? ` · ${agent.models.length} models` : ''}</Tag>)
           : <span>{t('remoteNoAgents')}</span>}</div></div>
     </li>)}</ul> : <Hint>{t('remoteNoRunners')}</Hint>}
     {data.jobs.length > 0 && <KeyValues rows={data.jobs.map(job => [job.id,
@@ -109,6 +109,10 @@ export function ExecutionSettings() {
   const draft = useBlockDraft('executor', saved, blocks.executor.revision,
     value => ({ ...value, maxWorkers: numberOf(value.maxWorkers), blockedCommands: value.blockedCommands.split(/[\s,]+/).filter(Boolean) }))
   const value = draft.value
+  // Models come from the runners that can drive the chosen agent; ids repeat across machines, so dedupe.
+  const models = [...new Map((remote?.runners ?? []).flatMap(runner => runner.agents
+    .filter(agent => agent.id === value.agent && agent.driver)
+    .flatMap(agent => agent.models)).map(model => [model.id, model])).values()]
   const edit = (next: Partial<typeof value>) => draft.edit({ ...value, ...next })
   const prepare = useRef<HTMLTextAreaElement>(null)
   const insert = (key: string) => {
@@ -127,6 +131,12 @@ export function ExecutionSettings() {
           <Field label={t('localAgent')} hint={t('localAgentHint')}>
             <select className="dt-select" value={value.agent} onChange={event => edit({ agent: event.target.value })}>
               {agents.map(agent => <option key={agent} value={agent}>{agent}</option>)}
+            </select>
+          </Field>
+          <Field label={t('localAgentModel')} hint={t('localAgentModelHint')} note={value.agentModel ? undefined : t('localAgentModelDefault')}>
+            <select className="dt-select" value={value.agentModel} onChange={event => edit({ agentModel: event.target.value })}>
+              <option value="">{t('localAgentModelEmpty')}</option>
+              {models.map(model => <option key={model.id} value={model.id}>{model.name} · {model.id}</option>)}
             </select>
           </Field>
           <Field label={t('maxWorkers')} hint={t('maxWorkersHint')}>

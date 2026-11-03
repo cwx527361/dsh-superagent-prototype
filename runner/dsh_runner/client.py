@@ -61,7 +61,7 @@ class Runner:
                     platform.system().lower(),
                     self._arch(),
                     self.cfg.max_concurrency,
-                    agents.detect(),
+                    await agents.detect_async(self.cfg.opencode_url, self.cfg.opencode_password),
                 )
             )
             heartbeat = asyncio.create_task(self._heartbeat(ws))

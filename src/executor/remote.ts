@@ -51,13 +51,14 @@ export class HubClient {
   constructor(private readonly options: HubOptions) {}
 
   /** POSTs a job and returns its id; throws when the hub rejects it (such as when no runner is online). */
-  async submit(body: { ticket: string; prompt: string; branch?: string; timeoutMs?: number; agent?: string }): Promise<string> {
+  async submit(body: { ticket: string; prompt: string; branch?: string; timeoutMs?: number; agent?: string; model?: string }): Promise<string> {
     const response = await this.call('/jobs', 'POST', {
       ticket: body.ticket,
       prompt: body.prompt,
       ...body.branch ? { branch: body.branch } : {},
       ...body.timeoutMs ? { timeoutMs: body.timeoutMs } : {},
       ...body.agent ? { agent: body.agent } : {},
+      ...body.model ? { model: body.model } : {},
       repo: { dir: this.options.repoDir ?? '', gitUrl: this.options.repoUrl ?? '' },
       ...this.options.base ? { base: this.options.base } : {},
       ...this.options.model ? { model: this.options.model } : {},
@@ -116,7 +117,16 @@ export interface RemoteStatus {
   jobs: { id: string; ticket: string; status: string; deviceId: string }[]
 }
 /** One agent CLI a runner reported: detected always, drivable only when it names a driver. */
-export interface RunnerAgent { id: string; name: string; path: string; version: string; driver: string | null }
+export interface RunnerAgent {
+  id: string
+  name: string
+  path: string
+  version: string
+  driver: string | null
+  models: RunnerAgentModel[]
+}
+/** One model the agent already has configured, as `provider/model`. */
+export interface RunnerAgentModel { id: string; name: string; provider: string }
 /** One hub job as the hub lists it. */
 interface JobSummary { id: string; ticket: string; status: string; deviceId: string }
 /** One ticket's remote job. */
@@ -257,9 +267,9 @@ export class RemoteExecutor implements Executor {
     const job = this.jobs.get(ticket.id)!
     try {
       this.host.engine.assignmentStarted(ticket.id, assignment.id)
-      const agent = this.host.store.settings().executor.agent
+      const { agent, agentModel } = this.host.store.settings().executor
       job.jobId = await this.client.submit({ ticket: ticket.id, prompt: this.prompt(ticket), branch: `feat/${ticket.id}`,
-        ...agent ? { agent } : {} })
+        ...agent ? { agent } : {}, ...agentModel ? { model: agentModel } : {} })
       this.views.set(ticket.id, { jobId: job.jobId, state: 'offered', startedAt: new Date().toISOString(), lines: [] })
       job.markReady()
       const terminal = await this.wait(job.jobId, abort.signal, ticket.id)

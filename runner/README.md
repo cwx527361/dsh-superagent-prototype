@@ -91,8 +91,14 @@ reads `<binary> --version`, and sends them in `hello.agents`:
 
 ```json
 {"id": "opencode", "name": "opencode", "path": "/opt/homebrew/bin/opencode",
- "version": "v2.1.2", "driver": "opencode"}
+ "version": "v2.1.2", "driver": "opencode",
+ "models": [{"id": "deepseek/deepseek-flash", "name": "DeepSeek V4.1 Flash 1017", "provider": "deepseek"}]}
 ```
+
+`models` is read from the agent's own configuration (for opencode,
+`GET /api/model` on the local server), so the list is exactly what that machine
+can already run — no API keys travel to the panel. `executor.agent` and
+`executor.agentModel` pick one; an empty model means "the agent's own default".
 
 `driver` names the adapter the runner implements for that tool; `null` means
 "installed, but this runner cannot drive it yet". The hub stores the list, its
