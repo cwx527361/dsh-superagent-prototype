@@ -1,14 +1,16 @@
 #!/bin/sh
-# Build the runner release artifacts published to S3.
+# Build the dsh-runner CLI release artifacts published to S3.
 #
 #   VERSION=0.1.0-abc1234 ./runner/release/release.sh
 #
-# Layout (see platform-design/local-runner-cli.md §2):
+# The runner is a pure-Python CLI (no .exe/.dmg): the artifact is a wheel,
+# installed by `uv tool install` (see install/install.sh). Layout:
+#
 #   dist/releases/<version>/manifest.json
-#   dist/releases/<version>/<os>/<arch>/dsh-runner-<version>-<os>-<arch>.tar.gz{,.sha256,.sig}
+#   dist/releases/<version>/dsh_runner-<version>-py3-none-any.whl{,.sha256,.sig}
 #   dist/channels/stable.json
 #
-# RELEASE_KEY (an ed25519 private key in PEM form) signs the tarballs when set.
+# RELEASE_KEY (an ed25519 private key in PEM form) signs the wheel when set.
 set -eu
 
 cd "$(dirname "$0")/../.."
@@ -17,63 +19,49 @@ RUNNER_DIR="$ROOT/runner"
 OUT=${OUT:-$ROOT/dist}
 case "$OUT" in /*) ;; *) OUT="$ROOT/$OUT" ;; esac
 VERSION=${VERSION:-0.1.0-$(git rev-parse --short HEAD 2>/dev/null || echo dev)}
-MATRIX=${MATRIX:-"darwin/amd64 darwin/arm64 linux/amd64 linux/arm64"}
-GO=${GO:-go}
+UV=${UV:-uv}
+: "${UV_CACHE_DIR:=$ROOT/.poc/uv-cache}"
+: "${UV_PYTHON_INSTALL_DIR:=$ROOT/.poc/uv-python}"
+export UV_CACHE_DIR UV_PYTHON_INSTALL_DIR
 
-rm -rf "$OUT/releases/$VERSION"
-mkdir -p "$OUT/releases/$VERSION" "$OUT/channels"
+DIST="$OUT/releases/$VERSION"
+rm -rf "$DIST"
+mkdir -p "$DIST" "$OUT/channels"
 
-entries=""
-for pair in $MATRIX; do
-	os=${pair%/*}
-	arch=${pair#*/}
-	name="dsh-runner-$VERSION-$os-$arch"
-	dir="$OUT/releases/$VERSION/$os/$arch"
-	mkdir -p "$dir"
-	echo "building $name"
-	(cd "$RUNNER_DIR" && GOOS=$os GOARCH=$arch CGO_ENABLED=0 "$GO" build \
-		-trimpath -ldflags "-s -w -X main.Version=$VERSION" \
-		-o "$dir/dsh-runner" .)
-	(
-		cd "$dir"
-		tar -czf "$name.tar.gz" dsh-runner
-		rm dsh-runner
-		if command -v sha256sum >/dev/null 2>&1; then
-			sha256sum "$name.tar.gz" > "$name.tar.gz.sha256"
-		else
-			shasum -a 256 "$name.tar.gz" > "$name.tar.gz.sha256"
-		fi
-		if [ -n "${RELEASE_KEY:-}" ]; then
-			openssl pkeyutl -sign -inkey "$RELEASE_KEY" -rawin \
-				-in "$name.tar.gz" -out "$name.tar.gz.sig"
-		fi
-	)
-	sha=$(cut -d' ' -f1 "$dir/$name.tar.gz.sha256")
-	entries="$entries
-    \"$os-$arch\": { \"url\": \"releases/$VERSION/$os/$arch/$name.tar.gz\", \"sha256\": \"$sha\", \"size\": $(wc -c < "$dir/$name.tar.gz" | tr -d ' ') },"
-done
+echo "building dsh-runner $VERSION"
+(cd "$RUNNER_DIR" && cp pyproject.toml "$DIST/pyproject.toml.bak" \
+	&& sed -e "s/^version = .*/version = \"$VERSION\"/" pyproject.toml >pyproject.toml.tmp \
+	&& mv pyproject.toml.tmp pyproject.toml \
+	&& "$UV" build --out-dir "$DIST" 2>&1 | tail -3; \
+	mv "$DIST/pyproject.toml.bak" pyproject.toml)
 
-cat > "$OUT/releases/$VERSION/manifest.json" <<EOF
+WHEEL=$(ls "$DIST"/*.whl | head -1)
+NAME=$(basename "$WHEEL")
+if command -v sha256sum >/dev/null 2>&1; then
+	SUM=$(sha256sum "$WHEEL" | awk '{print $1}')
+else
+	SUM=$(shasum -a 256 "$WHEEL" | awk '{print $1}')
+fi
+printf '%s  %s\n' "$SUM" "$NAME" >"$DIST/$NAME.sha256"
+
+if [ -n "${RELEASE_KEY:-}" ]; then
+	echo "signing $NAME"
+	openssl pkeyutl -sign -inkey "$RELEASE_KEY" -rawin -in "$WHEEL" -out "$DIST/$NAME.sig"
+else
+	echo "RELEASE_KEY not set: publishing unsigned (dev only)"
+fi
+
+cat >"$DIST/manifest.json" <<JSON
 {
   "version": "$VERSION",
-  "releasedAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "protocol": 1,
-  "minimumVersion": "0.1.0",
-  "artifacts": {${entries%,}
-  }
+  "kind": "python-wheel",
+  "python": ">=3.12",
+  "files": [
+    { "name": "$NAME", "sha256": "$SUM", "size": $(wc -c <"$WHEEL" | tr -d ' ') }
+  ]
 }
-EOF
+JSON
+cp "$DIST/manifest.json" "$OUT/channels/stable.json"
 
-cat > "$OUT/channels/stable.json" <<EOF
-{
-  "channel": "stable",
-  "version": "$VERSION",
-  "rolloutPercent": 100,
-  "minimumVersion": "0.1.0",
-  "manifestUrl": "releases/$VERSION/manifest.json"
-}
-EOF
-
-echo
-echo "artifacts in $OUT"
-find "$OUT" -type f | sort
+echo "artifacts in $DIST and $OUT/channels/stable.json"
+ls -la "$DIST"

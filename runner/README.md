@@ -24,17 +24,21 @@ cd ~/path/to/dsh-superagent-prototype
 docker compose -f docker/docker-compose.yml up -d hub
 curl -s http://127.0.0.1:4096/health   # {"ok":true,...}
 
-# 2. Log the runner in (dev token; OAuth wiring is the next milestone)
-export DSH_RUNNER_HOME="$PWD/.poc/runner-home"
-go build -o "$PWD/.poc/bin/dsh-runner" ./runner   # or use runner/release/install.sh
-.poc/bin/dsh-runner login --server http://127.0.0.1:4096 --token dev-token
+# 2. Install the CLI (pure Python, no .exe/.dmg)
+cd runner && uv sync && uv run dsh-runner --help
+# or from a published channel:
+#   sh install/install.sh https://<bucket>/channels/stable.json
 
-# 3. Point it at the local opencode server and run it
-export DSH_OPENCODE_PASSWORD="$(grep -o 'server password .*' .poc/logs/opencode-serve.log | tail -1 | cut -d' ' -f3)"
-.poc/bin/dsh-runner doctor
-.poc/bin/dsh-runner start
+# 3. Log the runner in (dev token; OAuth wiring is the next milestone)
+export DSH_RUNNER_HOME="$PWD/../.poc/runner-home"
+uv run dsh-runner login --server http://127.0.0.1:4096 --token dev-token
 
-# 4. Dispatch a job from another shell
+# 4. Point it at the local opencode server and run it
+export OPENCODE_PASSWORD="$(grep -o 'server password .*' ../.poc/logs/opencode-serve.log | tail -1 | cut -d' ' -f3)"
+uv run dsh-runner doctor
+uv run dsh-runner start
+
+# 5. Dispatch a job from another shell
 curl -s -X POST http://127.0.0.1:4096/jobs -H 'content-type: application/json' -d '{
   "ticket": "demo-1",
   "repo": {"dir": "/absolute/path/to/a/repo"},
@@ -46,7 +50,21 @@ curl -s http://127.0.0.1:4096/jobs/<jobId> | jq '.status, .result'
 ```
 
 The runner must be able to reach `opencode serve` (default
-`http://127.0.0.1:4097`). `docker/poc/README.md` explains how to start it with
+`http://127.0.0.1:4097`).
+
+## Install (CLI only)
+
+The runner ships as a Python 3.12 wheel and is installed with
+[`uv`](https://docs.astral.sh/uv/):
+
+```sh
+uv tool install dsh-runner                    # once published to PyPI
+sh runner/install/install.sh <channel.json>   # from our S3 channel (sha256 checked)
+```
+
+No `.exe`, `.dmg`, or PyInstaller bundle: it is a normal command-line tool.
+`runner/release/release.sh` builds the wheel, its `.sha256`, an optional ed25519
+`.sig`, and `channels/stable.json`. `docker/poc/README.md` explains how to start it with
 an isolated `XDG_DATA_HOME` and a printed password.
 
 ## Commands
