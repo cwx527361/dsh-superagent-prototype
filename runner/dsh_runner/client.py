@@ -11,7 +11,7 @@ from typing import Any, Callable
 from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosed
 
-from . import protocol
+from . import agents, protocol
 from .config import Config
 from .job import JobError, run_job
 from .opencode import Opencode
@@ -61,6 +61,7 @@ class Runner:
                     platform.system().lower(),
                     self._arch(),
                     self.cfg.max_concurrency,
+                    agents.detect(),
                 )
             )
             heartbeat = asyncio.create_task(self._heartbeat(ws))

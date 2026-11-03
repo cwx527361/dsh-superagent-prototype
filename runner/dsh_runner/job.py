@@ -115,6 +115,9 @@ async def run_job(
 ) -> dict[str, Any]:
     """Execute one job; raises JobError on failure (caller frames job.failed)."""
     job_id = spec["jobId"]
+    agent = spec.get("agent") or "opencode"
+    if agent != "opencode":
+        raise JobError("agent_unsupported", f"this runner cannot drive {agent} yet", retryable=False)
     timeout = min(float(spec.get("timeoutMs") or JOB_TIMEOUT) / 1000.0, JOB_TIMEOUT)
     oc = Opencode(opencode_url, opencode_password)
     session_id = ""

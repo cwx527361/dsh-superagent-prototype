@@ -28,7 +28,8 @@ def envelope(kind: str, payload: dict[str, Any]) -> dict[str, Any]:
     return {"v": PROTOCOL_VERSION, "id": str(uuid.uuid4()), "type": kind, "ts": now(), "payload": payload}
 
 
-def hello(device_id: str, version: str, os_name: str, arch: str, max_concurrency: int) -> str:
+def hello(device_id: str, version: str, os_name: str, arch: str, max_concurrency: int,
+          agents: list[dict[str, Any]] | None = None) -> str:
     return frame(
         "hello",
         {
@@ -38,6 +39,7 @@ def hello(device_id: str, version: str, os_name: str, arch: str, max_concurrency
             "arch": arch,
             "capabilities": ["worktree", "cancel", "eventStream"],
             "maxConcurrency": max_concurrency,
+            "agents": agents or [],
         },
     )
 

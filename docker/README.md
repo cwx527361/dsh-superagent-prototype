@@ -151,6 +151,12 @@ polls it, forwards follow-ups as inputs, and reports branch/commit/diffstat
 back to the Engine. `runner/README.md` lists every variable and the
 `POST /jobs/:id/input` call.
 
+Each runner reports the agent CLIs it found (`opencode`, `claude`, ...) with
+their versions; the Execution tab shows them as tags, and 设置 → 执行 → 本地智能体
+picks which one a remote job runs. The hub only offers a job to a machine that
+can drive the requested agent, so a mis-set choice fails loudly instead of
+running a different tool.
+
 ## Volumes and lifecycle
 
 | Volume     | Mount point       | Holds                                    |

@@ -83,6 +83,26 @@ Env overrides: `DSH_RUNNER_HOME`, `DSH_OPENCODE_URL`,
 `DSH_OPENCODE_PASSWORD`, `DSH_RUNNER_WORKSPACE`,
 `DSH_RUNNER_MAX_CONCURRENCY`.
 
+## Agents on this machine
+
+On every connect the runner probes a fixed list of agent CLIs
+(`dsh_runner/agents.py`: opencode, claude, codex, gemini, aider, cursor-agent),
+reads `<binary> --version`, and sends them in `hello.agents`:
+
+```json
+{"id": "opencode", "name": "opencode", "path": "/opt/homebrew/bin/opencode",
+ "version": "v2.1.2", "driver": "opencode"}
+```
+
+`driver` names the adapter the runner implements for that tool; `null` means
+"installed, but this runner cannot drive it yet". The hub stores the list, its
+`/health` returns it per device, and the panel shows those tags on the Execution
+tab. `executor.agent` in the panel's settings picks which one a job uses: the
+hub only offers the job to a runner that reported that agent with a driver, and
+answers `503 no runner online can drive <agent>` otherwise. Today only
+`opencode` has a driver; a job asking for anything else fails with
+`agent_unsupported` rather than silently running something else.
+
 ## Job lifecycle
 
 1. Hub sends `job.offer` with a `JobSpec` (repo dir or clone URL, base, ticket,
@@ -90,12 +110,13 @@ Env overrides: `DSH_RUNNER_HOME`, `DSH_OPENCODE_URL`,
 2. Runner replies `job.accept`, resolves the base commit, and cuts
    `<repo>/.dsh/worktrees/<jobId>` on `feat/<ticket>` so the user's checkout is
    never touched.
-3. Runner creates an opencode session pinned to that worktree + model, sends the
-   prompt, and polls every 2s, forwarding assistant text as `job.event`.
+3. Runner drives the requested `spec.agent` (opencode today) in that worktree,
+   sends the prompt, and polls every 2s, forwarding assistant text as
+   `job.event`.
 4. On success it sends `job.result` (branch, commit, `git diff --stat
    <base>...HEAD`) and removes the worktree. On failure the worktree is kept for
    inspection and `job.failed` carries the cause (`workspace`, `timeout`,
-   `cancelled`, `agent_failed`, `opencode_*`, `runner_too_old`).
+   `cancelled`, `agent_failed`, `agent_unsupported`, `opencode_*`, `runner_too_old`).
 
 ## Hub API (POC)
 

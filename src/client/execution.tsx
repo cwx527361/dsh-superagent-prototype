@@ -26,7 +26,11 @@ function RemoteRunners() {
     {data.runners.length > 0 ? <ul className="dt-list">{data.runners.map(runner => <li key={runner.id} className="dt-row">
       <div className="dt-row-main"><div className="dt-row-title dt-mono">{runner.id}</div>
         <div className="dt-row-meta"><span>{runner.os}/{runner.arch}</span><span>{runner.version}</span>
-          <LabelValue label={t('executingLabel')} value={runner.running} /></div></div>
+          <LabelValue label={t('executingLabel')} value={runner.running} /></div>
+        <div className="dt-row-meta">{runner.agents.length > 0
+          ? runner.agents.map(agent => <Tag key={agent.id} tone={agent.driver ? 'success' : 'neutral'}>
+            {agent.id}{agent.version ? ` ${agent.version}` : ''}</Tag>)
+          : <span>{t('remoteNoAgents')}</span>}</div></div>
     </li>)}</ul> : <Hint>{t('remoteNoRunners')}</Hint>}
     {data.jobs.length > 0 && <KeyValues rows={data.jobs.map(job => [job.id,
       `${job.ticket} · ${job.status} · ${job.deviceId}`])} />}
@@ -95,7 +99,9 @@ function EnvironmentVariables({ groups, sources,
   </DisclosureRow>
 }
 export function ExecutionSettings() {
-  const { t } = usePanel()
+  const { t, call } = usePanel()
+  const { data: remote } = usePoll(() => call('GET remote'), [], 15000)
+  const agents = [...new Set(['opencode', ...(remote?.runners ?? []).flatMap(runner => runner.agents.map(agent => agent.id))])]
   const { blocks, environment, sources } = useSettings().settings
   // Keep raw user text (such as separators between blocked commands) in the draft and parse only on save.
   const executor = blocks.executor.value
@@ -118,6 +124,11 @@ export function ExecutionSettings() {
           <h2 className="dt-block-title">{t('term.executor')}<InfoTip text={t('executorIntro')} /></h2>
           <Section title={t('executorModel')} hint={t('executorModelHint')}><ModelField id="dt-worker-model" value={value.model}
             onChange={model => edit({ model })} /></Section>
+          <Field label={t('localAgent')} hint={t('localAgentHint')}>
+            <select className="dt-select" value={value.agent} onChange={event => edit({ agent: event.target.value })}>
+              {agents.map(agent => <option key={agent} value={agent}>{agent}</option>)}
+            </select>
+          </Field>
           <Field label={t('maxWorkers')} hint={t('maxWorkersHint')}>
             <Input type="number" min={LIMITS.maxWorkers.min} max={LIMITS.maxWorkers.max} required value={value.maxWorkers}
               onChange={event => edit({ maxWorkers: event.target.value })} />

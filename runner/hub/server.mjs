@@ -4,7 +4,7 @@
 //   POST /runner/oauth/start   (501 in the POC: the company SSO wiring is next)
 //   POST /runner/oauth/exchange
 //   GET  /health
-//   POST /jobs                 {ticket, repo:{dir,gitUrl}, base, branch, prompt, model, timeoutMs, deviceId?}
+//   POST /jobs                 {ticket, repo:{dir,gitUrl}, base, branch, prompt, model, agent?, timeoutMs, deviceId?}
 //   GET  /jobs                 list
 //   GET  /jobs/:id             state + events + result
 //   POST /jobs/:id/cancel      {reason}
@@ -83,12 +83,17 @@ function onlineDevices() {
 function runningOn(deviceId) {
   return [...jobs.values()].filter((j) => j.deviceId === deviceId && (j.status === 'offered' || j.status === 'running')).length
 }
-function pickDevice(preferred) {
+function canDrive(device, agent) {
+  return (device.agents ?? []).some((entry) => entry.id === agent && entry.driver)
+}
+
+function pickDevice(preferred, agent) {
+  const wanted = agent || 'opencode'
   if (preferred) {
     const d = devices.get(preferred)
-    if (d?.ws) return d
+    if (d?.ws && canDrive(d, wanted)) return d
   }
-  const candidates = onlineDevices().filter((d) => runningOn(d.id) < (d.maxConcurrency ?? 1))
+  const candidates = onlineDevices().filter((d) => runningOn(d.id) < (d.maxConcurrency ?? 1) && canDrive(d, wanted))
   candidates.sort((a, b) => runningOn(a.id) - runningOn(b.id))
   return candidates[0] ?? null
 }
@@ -103,7 +108,7 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, {
         ok: true,
         protocol: PROTOCOL,
-        runners: onlineDevices().map((d) => ({ id: d.id, os: d.os, arch: d.arch, version: d.version, running: runningOn(d.id) })),
+        runners: onlineDevices().map((d) => ({ id: d.id, os: d.os, arch: d.arch, version: d.version, running: runningOn(d.id), agents: d.agents ?? [] })),
         jobs: {
           queued: [...jobs.values()].filter((j) => j.status === 'offered').length,
           running: [...jobs.values()].filter((j) => j.status === 'running').length,
@@ -132,8 +137,9 @@ const server = http.createServer(async (req, res) => {
 
     if (route === 'POST /jobs') {
       const body = await readJSON(req)
-      const device = pickDevice(body.deviceId)
-      if (!device) return json(res, 503, { error: 'no runner online' })
+      const agent = body.agent || 'opencode'
+      const device = pickDevice(body.deviceId, agent)
+      if (!device) return json(res, 503, { error: `no runner online can drive ${agent}` })
       const jobId = `job_${randomBytes(6).toString('hex')}`
       const ticket = body.ticket ?? jobId
       const spec = {
@@ -144,6 +150,7 @@ const server = http.createServer(async (req, res) => {
         branch: body.branch ?? `feat/${ticket}`,
         prompt: body.prompt ?? '',
         model: body.model ?? 'deepseek/deepseek-flash',
+        agent,
         timeoutMs: Number(body.timeoutMs) || 30 * 60 * 1000,
         worktree: { dir: body.worktree?.dir ?? '' },
       }
@@ -231,6 +238,7 @@ wss.on('connection', (ws, device) => {
         device.arch = payload.arch ?? device.arch
         device.version = payload.version ?? device.version
         device.maxConcurrency = payload.maxConcurrency ?? device.maxConcurrency
+        device.agents = Array.isArray(payload.agents) ? payload.agents : device.agents ?? []
         persistDevices()
         break
       case 'heartbeat':
