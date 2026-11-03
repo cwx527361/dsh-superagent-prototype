@@ -121,6 +121,8 @@ export interface RunnerAgent {
   id: string
   name: string
   path: string
+  /** `cli` for a binary on PATH, `app` for a desktop app bundle detected on macOS. */
+  kind: string
   version: string
   driver: string | null
   models: RunnerAgentModel[]

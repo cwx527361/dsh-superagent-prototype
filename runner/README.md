@@ -85,13 +85,26 @@ Env overrides: `DSH_RUNNER_HOME`, `DSH_OPENCODE_URL`,
 
 ## Agents on this machine
 
-On every connect the runner probes a fixed list of agent CLIs
-(`dsh_runner/agents.py`: opencode, claude, codex, gemini, aider, cursor-agent),
-reads `<binary> --version`, and sends them in `hello.agents`:
+On every connect the runner probes a list of agent tools (`dsh_runner/agents.py`)
+and sends what it found in `hello.agents`. Two shapes are covered:
+
+- **CLI** (`kind: "cli"`): opencode, claude, codex, gemini, aider,
+  cursor-agent, dsh, workbuddy, codebuddy — looked up on `PATH` first, then in
+  `~/.local/bin`, `~/bin`, `/opt/homebrew/bin`, `/usr/local/bin`; version from
+  `<binary> --version`.
+- **Desktop app** (`kind: "app"`): DeepSeek Harness, WorkBuddy, CodeBuddy —
+  detected as macOS bundles under `/Applications` and versioned from
+  `Info.plist` (`CFBundleShortVersionString`). They have no CLI of their own, so
+  they are reported (and shown in the panel) but `driver` is `null`:
+
+```json
+{"id": "deepseek-harness", "name": "DeepSeek Harness", "path": "/Applications/DeepSeek Harness.app",
+ "kind": "app", "version": "0.2.1-rc.5", "driver": null, "models": []}
+```
 
 ```json
 {"id": "opencode", "name": "opencode", "path": "/opt/homebrew/bin/opencode",
- "version": "v2.1.2", "driver": "opencode",
+ "kind": "cli", "version": "v2.1.2", "driver": "opencode",
  "models": [{"id": "deepseek/deepseek-flash", "name": "DeepSeek V4.1 Flash 1017", "provider": "deepseek"}]}
 ```
 

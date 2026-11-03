@@ -279,6 +279,8 @@ const TEXT = {
   remoteHealthy: ['已连接', 'Connected'],
   remoteUnhealthy: ['不可达', 'Unreachable'],
   remoteNoRunners: ['还没有本地执行器连上 hub。', 'No local runner is connected to the hub yet.'],
+  localAgentDetectedOnly: ['（未接入）', '(no adapter)'],
+  localAgentApp: ['桌面应用', 'desktop app'],
   remoteNoAgents: ['这台机器上没有探测到可执行的智能体工具。', 'No agent CLI was detected on this machine.'],
   localAgent: ['本地智能体', 'Local agent'],
   localAgentModel: ['本地智能体模型', 'Agent model'],

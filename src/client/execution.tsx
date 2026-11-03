@@ -29,7 +29,8 @@ function RemoteRunners() {
           <LabelValue label={t('executingLabel')} value={runner.running} /></div>
         <div className="dt-row-meta">{runner.agents.length > 0
           ? runner.agents.map(agent => <Tag key={agent.id} tone={agent.driver ? 'success' : 'neutral'}>
-            {agent.id}{agent.version ? ` ${agent.version}` : ''}{agent.models.length > 0 ? ` · ${agent.models.length} models` : ''}</Tag>)
+            {agent.id}{agent.version ? ` ${agent.version}` : ''}{agent.kind === 'app' ? ` · ${t('localAgentApp')}` : ''}
+            {agent.models.length > 0 ? ` · ${agent.models.length} models` : ''}</Tag>)
           : <span>{t('remoteNoAgents')}</span>}</div></div>
     </li>)}</ul> : <Hint>{t('remoteNoRunners')}</Hint>}
     {data.jobs.length > 0 && <KeyValues rows={data.jobs.map(job => [job.id,
@@ -101,7 +102,11 @@ function EnvironmentVariables({ groups, sources,
 export function ExecutionSettings() {
   const { t, call } = usePanel()
   const { data: remote } = usePoll(() => call('GET remote'), [], 15000)
-  const agents = [...new Set(['opencode', ...(remote?.runners ?? []).flatMap(runner => runner.agents.map(agent => agent.id))])]
+  // Every agent any runner reported, with whether some runner can actually drive it.
+  const detected = new Map((remote?.runners ?? []).flatMap(runner => runner.agents)
+    .map(agent => [agent.id, { drivable: Boolean(agent.driver), version: agent.version }]))
+  const agents = [...detected.keys()].filter(id => detected.get(id)?.drivable)
+  if (!detected.has('opencode')) agents.unshift('opencode')
   const { blocks, environment, sources } = useSettings().settings
   // Keep raw user text (such as separators between blocked commands) in the draft and parse only on save.
   const executor = blocks.executor.value
@@ -131,6 +136,8 @@ export function ExecutionSettings() {
           <Field label={t('localAgent')} hint={t('localAgentHint')}>
             <select className="dt-select" value={value.agent} onChange={event => edit({ agent: event.target.value })}>
               {agents.map(agent => <option key={agent} value={agent}>{agent}</option>)}
+              {[...detected].filter(([id]) => !agents.includes(id)).map(([id, info]) => <option key={id} value={id} disabled>
+                {id}{info.version ? ` ${info.version}` : ''} {t('localAgentDetectedOnly')}</option>)}
             </select>
           </Field>
           <Field label={t('localAgentModel')} hint={t('localAgentModelHint')} note={value.agentModel ? undefined : t('localAgentModelDefault')}>
