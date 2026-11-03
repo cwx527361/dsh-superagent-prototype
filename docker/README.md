@@ -133,6 +133,24 @@ The hub listens on `127.0.0.1:4096` and keeps its state under
 the developer's machine (`runner/README.md`); it dials out, so no host port is
 opened. `HUB_TOKEN` defaults to `dev-token` — set it before sharing the hub.
 
+To make the **panel** dispatch tickets to that runner instead of running worker
+Sessions in this container, set `DSH_REMOTE_HUB` on the `superagent` service
+and restart it:
+
+```yaml
+environment:
+  DSH_REMOTE_HUB: http://hub:4096
+  DSH_REMOTE_TOKEN: dev-token
+  DSH_REMOTE_REPO_DIR: /Users/me/corp-work/superagent/dsh-superagent-prototype
+  DSH_REMOTE_BASE: main
+  DSH_REMOTE_MODEL: deepseek/deepseek-flash
+```
+
+`src/executor/remote.ts` then submits each ticket's assignment to the hub,
+polls it, forwards follow-ups as inputs, and reports branch/commit/diffstat
+back to the Engine. `runner/README.md` lists every variable and the
+`POST /jobs/:id/input` call.
+
 ## Volumes and lifecycle
 
 | Volume     | Mount point       | Holds                                    |

@@ -148,7 +148,7 @@ const server = http.createServer(async (req, res) => {
         worktree: { dir: body.worktree?.dir ?? '' },
       }
       if (!spec.prompt) return json(res, 400, { error: 'prompt is required' })
-      const job = { id: jobId, spec, deviceId: device.id, status: 'offered', createdAt: new Date().toISOString(), acceptedAt: null, finishedAt: null, events: [], result: null, failure: null }
+      const job = { id: jobId, spec, deviceId: device.id, status: 'offered', createdAt: new Date().toISOString(), acceptedAt: null, finishedAt: null, events: [], inputs: [], result: null, failure: null }
       jobs.set(jobId, job)
       persistJobs()
       sendWS(device.ws, 'job.offer', spec)
@@ -161,12 +161,22 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { jobs: list.reverse() })
     }
 
-    const jobMatch = url.pathname.match(/^\/jobs\/([^/]+)(\/cancel)?$/)
+    const jobMatch = url.pathname.match(/^\/jobs\/([^/]+)(\/(cancel|input))?$/)
     if (jobMatch) {
       const job = jobs.get(jobMatch[1])
       if (!job) return json(res, 404, { error: 'unknown job' })
       if (req.method === 'GET' && !jobMatch[2]) return json(res, 200, job)
-      if (req.method === 'POST' && jobMatch[2]) {
+      if (req.method === 'POST' && jobMatch[3] === 'input') {
+        const body = await readJSON(req)
+        if (!body.text) return json(res, 400, { error: 'text is required' })
+        const live = job.status === 'offered' || job.status === 'running'
+        job.inputs.push({ at: new Date().toISOString(), text: body.text })
+        sendWS(devices.get(job.deviceId)?.ws, 'job.input', { jobId: job.id, text: body.text })
+        persistJobs()
+        log(`job ${job.id} input (${body.text.length} chars)`)
+        return json(res, 200, { jobId: job.id, accepted: live, status: job.status })
+      }
+      if (req.method === 'POST' && jobMatch[3] === 'cancel') {
         const body = await readJSON(req)
         job.status = 'cancelled'
         job.finishedAt = new Date().toISOString()

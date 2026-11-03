@@ -14,6 +14,7 @@ from websockets.exceptions import ConnectionClosed
 from . import protocol
 from .config import Config
 from .job import JobError, run_job
+from .opencode import Opencode
 
 Log = Callable[[str], None]
 
@@ -23,6 +24,7 @@ class Runner:
         self.cfg = cfg
         self.log = log
         self.tasks: dict[str, asyncio.Task[None]] = {}
+        self.sessions: dict[str, str] = {}
         self.version = "0.1.0"
 
     @property
@@ -101,6 +103,12 @@ class Runner:
             task = asyncio.create_task(self._execute(ws, payload))
             self.tasks[job_id] = task
             task.add_done_callback(lambda _t, j=job_id: self.tasks.pop(j, None))
+        elif kind == "job.input":
+            job_id = payload.get("jobId") or ""
+            text = payload.get("text") or ""
+            session_id = self.sessions.get(job_id)
+            if session_id and text:
+                asyncio.create_task(self._steer(ws, job_id, session_id, text))
         elif kind == "job.cancel":
             task = self.tasks.get(payload.get("jobId") or "")
             if task:
@@ -108,6 +116,16 @@ class Runner:
                 task.cancel()
         elif kind == "ping":
             await ws.send(protocol.frame("pong", {}))
+
+    async def _steer(self, ws: Any, job_id: str, session_id: str, text: str) -> None:
+        """Forward a person's follow-up into the job's opencode session."""
+        oc = Opencode(self.cfg.opencode_url, self.cfg.opencode_password)
+        try:
+            await oc.prompt(session_id, text)
+            await self._send(ws, protocol.job_event(job_id, "input", {"session": session_id}, 0))
+            self.log(f"[job {job_id}] input delivered")
+        except Exception as err:  # noqa: BLE001 - the hub records the failure as an event
+            await self._send(ws, protocol.job_event(job_id, "input_failed", {"error": str(err)}, 0))
 
     async def _send(self, ws: Any, text: str) -> None:
         try:
@@ -128,6 +146,7 @@ class Runner:
                 spec,
                 opencode_url=self.cfg.opencode_url,
                 opencode_password=self.cfg.opencode_password,
+                on_session=lambda session_id: self.sessions.__setitem__(job_id, session_id),
                 emit=emit,
                 log=self.log,
             )
@@ -135,6 +154,10 @@ class Runner:
             self.log(f"[job {job_id}] failed ({err.cause}): {err.detail}")
             await self._send(ws, protocol.job_failed(job_id, err.cause, err.detail, err.retryable))
             return
+        except asyncio.CancelledError:
+            self.sessions.pop(job_id, None)
+            raise
+        self.sessions.pop(job_id, None)
         await self._send(
             ws,
             protocol.job_result(job_id, result["branch"], result["commit"], result["diffstat"], result["summary"]),

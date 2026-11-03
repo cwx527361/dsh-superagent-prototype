@@ -111,6 +111,7 @@ async def run_job(
     opencode_password: str,
     emit: Emit,
     log: Log,
+    on_session: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
     """Execute one job; raises JobError on failure (caller frames job.failed)."""
     job_id = spec["jobId"]
@@ -132,6 +133,8 @@ async def run_job(
             try:
                 session = await oc.create_session(worktree, spec.get("model") or "")
                 session_id = session["id"]
+                if on_session:
+                    on_session(session_id)
                 await oc.prompt(session_id, spec.get("prompt") or "")
             except (OpencodeError, KeyError) as err:
                 raise JobError("opencode_session", str(err)) from err

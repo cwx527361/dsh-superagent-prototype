@@ -105,10 +105,11 @@ Env overrides: `DSH_RUNNER_HOME`, `DSH_OPENCODE_URL`,
 | `WS /runner/connect` | `Authorization: Bearer <deviceToken>` |
 | `POST /jobs` | pick an idle runner, return `{jobId}` |
 | `GET /jobs`, `GET /jobs/:id` | status, events, result |
+| `POST /jobs/:id/input` | steers a person's follow-up into the running session |
 | `POST /jobs/:id/cancel` | sends `job.cancel` |
 | `GET /health` | runners + queue counters |
 
-Frames are `{v, id, type, ts, payload}` (see `protocol.go`). `HUB_TOKEN`
+Frames are `{v, id, type, ts, payload}` (see `dsh_runner/protocol.py`). `HUB_TOKEN`
 defaults to `dev-token`; set it in the environment for anything shared.
 
 ## Release
@@ -117,16 +118,38 @@ defaults to `dev-token`; set it in the environment for anything shared.
 VERSION=0.1.0-$(git rev-parse --short HEAD) ./runner/release/release.sh
 ```
 
-Writes `dist/releases/<version>/...` and `dist/channels/stable.json` (layout in
-the design doc §2). With `RELEASE_KEY=<ed25519 PEM>` each tarball also gets a
-`.sig`. `install.sh` resolves the channel, checks sha256 and installs to
-`~/.local/bin`.
+Writes `dist/releases/<version>/dsh_runner-<version>-py3-none-any.whl` and
+`dist/channels/stable.json` (layout in the design doc §2). With
+`RELEASE_KEY=<ed25519 PEM>` the wheel also gets a `.sig`. `install.sh` resolves
+the channel, checks sha256 and runs `uv tool install`.
 
 ## Known limits (deliberately deferred)
 
 - No TLS/device pinning yet: the POC talks plain `ws://` on loopback.
 - OAuth endpoints return `501`; only the dev token path is implemented.
-- First install verifies sha256 but not yet the detached signature; the
-  self-updater (M2) verifies `sha256 + ed25519` before swapping binaries.
+- `install.sh` checks sha256; the detached ed25519 signature is produced but
+  the self-updater (M2) is what will enforce it end to end.
 - One job at a time by default; a second offer waits in the hub.
+- A steered input (`POST /jobs/:id/input`) is delivered to the opencode session
+  on a best-effort basis: a job that already finished answers `accepted: false`.
 - No remote cancellation of opencode processes beyond an abort request.
+
+## Remote executor (panel -> runner)
+
+The superagent panel can dispatch a ticket's assignment here instead of running
+a worker Session inside the container. Set these on the **superagent** service
+and restart it:
+
+| variable | meaning |
+| --- | --- |
+| `DSH_REMOTE_HUB` | hub base URL, e.g. `http://hub:4096` (switches the executor) |
+| `DSH_REMOTE_TOKEN` | `HUB_TOKEN` value |
+| `DSH_REMOTE_REPO_DIR` | checkout on the developer machine (or leave empty and set the next) |
+| `DSH_REMOTE_REPO_URL` | clone URL the runner clones when no directory exists |
+| `DSH_REMOTE_BASE` | base revision (default `main`) |
+| `DSH_REMOTE_MODEL` | opencode model (default `deepseek/deepseek-flash`) |
+
+`src/executor/remote.ts` implements the Engine's `Executor`: it submits each
+ticket's assignment to the hub, polls the job, forwards people's follow-ups as
+inputs, reports the branch/commit/diffstat back, and marks the hub's health.
+Concurrency is `settings.executor.maxWorkers`; device choice is the hub's.
