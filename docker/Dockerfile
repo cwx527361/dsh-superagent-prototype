@@ -59,6 +59,9 @@ RUN pnpm install --frozen-lockfile
 COPY . .
 RUN pnpm build
 
+# M1 POC: the runner hub is a tiny standalone Node service with its own deps.
+RUN npm --prefix /opt/dsh-superagent/runner/hub install --omit=dev --no-audit --no-fund
+
 ### Bake a seeded DSH_HOME ####################################################
 # The runtime volume starts empty; the entrypoint copies this seed into it so
 # the first boot needs no network and no extra commands.

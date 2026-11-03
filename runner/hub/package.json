@@ -1,0 +1,14 @@
+{
+  "name": "dsh-runner-hub",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Minimal job hub for local dsh runners (M1 POC)",
+  "main": "server.mjs",
+  "scripts": {
+    "start": "node server.mjs"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

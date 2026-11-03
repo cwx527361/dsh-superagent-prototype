@@ -31,6 +31,32 @@ services:
       retries: 3
       start_period: 180s
 
+  # M1 POC: the job hub the local dsh-runner connects to. Same image, a
+  # different entrypoint; it shares dsh-home so both survive restarts.
+  hub:
+    image: dsh-superagent:local
+    container_name: dsh-runner-hub
+    restart: unless-stopped
+    entrypoint: ["/usr/bin/tini", "--", "gosu", "dsh"]
+    command: ["node", "/opt/dsh-superagent/runner/hub/server.mjs"]
+    ports:
+      - "127.0.0.1:4096:4096"
+    volumes:
+      - dsh-home:/home/dsh/.dsh
+    environment:
+      TZ: Asia/Shanghai
+      HOME: /home/dsh
+      PORT: "4096"
+      HUB_TOKEN: ${HUB_TOKEN:-dev-token}
+      STATE_DIR: /home/dsh/.dsh/hub
+      PUBLIC_URL: http://127.0.0.1:4096
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:4096/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
 volumes:
   dsh-home:
   dsh-work:

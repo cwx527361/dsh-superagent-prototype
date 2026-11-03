@@ -118,6 +118,21 @@ Details, API shape, and results: `docker/poc/README.md`. POC only: the server
 listens on every interface with one shared password; production needs a
 per-runner token over loopback/tunnel.
 
+## Runner hub (M1 POC)
+
+The same image also ships `runner/hub`, the control plane a local
+`dsh-runner` connects to. Start it alongside the panel:
+
+```bash
+docker compose -f docker/docker-compose.yml up -d hub
+curl -s http://127.0.0.1:4096/health
+```
+
+The hub listens on `127.0.0.1:4096` and keeps its state under
+`/home/dsh/.dsh/hub` in the shared `dsh-home` volume. The runner itself runs on
+the developer's machine (`runner/README.md`); it dials out, so no host port is
+opened. `HUB_TOKEN` defaults to `dev-token` — set it before sharing the hub.
+
 ## Volumes and lifecycle
 
 | Volume     | Mount point       | Holds                                    |
