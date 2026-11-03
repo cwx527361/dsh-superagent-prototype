@@ -65,6 +65,24 @@ function Assignments({ ticket }: { ticket: TicketPageView }) {
       sessionId={item.ref} /></div>}
   </li>)}</ul>
 }
+/** Live progress of a remote job: the runner streams its last output lines, so the panel shows what the machine is doing. */
+function RemoteJob({ job }: { job: NonNullable<TicketPageView['remote']> }) {
+  const { t } = usePanel()
+  const tone = job.state === 'succeeded' ? 'success' : job.state === 'failed' ? 'danger' : job.state === 'cancelled' ? 'warning' : 'info'
+  return <Section title={t('remoteExecution')} count={job.lines.length || undefined}>
+    <div className="dt-row-meta">
+      <Tag tone={tone}>{job.state}</Tag>
+      <span className="dt-mono">{job.jobId}</span>
+      {job.branch && <span className="dt-mono">{job.branch}</span>}
+      {job.commit && <span className="dt-mono">{job.commit.slice(0, 7)}</span>}
+      <When at={job.startedAt} />
+    </div>
+    {job.cause && <p className="dt-banner dt-danger">{job.cause}</p>}
+    {job.lines.length > 0 ? <ol className="dt-mono dt-remote-lines">{job.lines.map((line, index) => <li key={index}>{line}</li>)}</ol>
+      : <Hint>{t('remoteExecutionEmpty')}</Hint>}
+    {job.diffstat && <pre className="dt-mono">{job.diffstat}</pre>}
+  </Section>
+}
 function MandateDetails({ ticket, actor }: { ticket: TicketPageView; actor: string }) {
   const { t, navigate } = usePanel()
   const { mandate, decision } = ticket
@@ -162,6 +180,7 @@ export function TicketPage({ id }: { id: string }) {
       <ul className="dt-list">{data.threads.map(thread => <ThreadLine key={thread.key} thread={thread} ticketId={data.id}
         context={thread.context} />)}</ul>
     </Section>}
+    {data.remote && <RemoteJob job={data.remote} />}
     <div className="dt-details">
       {/* A single Assignment adds nothing beyond the status line; list Assignments only once work has been resumed or handed over. */}
       {data.assignments.length > 1 && <Details icon="queue" title={`${t('term.assignment')} · ${data.assignments.length}`} open><Assignments

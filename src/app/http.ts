@@ -8,6 +8,7 @@ import { sourceSkills } from './context.ts'
 import type { ModelCatalog } from '@deepseek-ai/dsh-api-session-controller/types'
 import { PromptConflict, SKILL_NAME, SKILL_PREFIX, TEAM_SECTIONS, builtInBase, builtInParts, defaultPrompts, savePrompts, type Prompts }
   from './prompts.ts'
+import type { RemoteJobView, RemoteStatus } from '../executor/remote.ts'
 import { policyVersion } from '../policy.ts'
 import { SettingsConflict, type Settings } from './settings.ts'
 import { SetupError, type SetupProblem } from '../setup.ts'
@@ -116,7 +117,9 @@ export type StateView = ReturnType<typeof stateView>
 function ticketPage(runtime: HttpHost, id: string) {
   const detail = ticketDetail(views(runtime), id), ticket = runtime.store.tickets.get(id)
   if (!detail || !ticket) throw new RouteError(404, 'Ticket not found')
-  return { ...detail, environment: runtime.configured() ? runtime.ticketEnvironment(ticket) : [] }
+  // A remote executor keeps the job it submitted for this ticket; the panel shows it as live progress.
+  const remote: RemoteJobView | undefined = (runtime.executor as { jobView?: (ticketId: string) => RemoteJobView }).jobView?.(id)
+  return { ...detail, environment: runtime.configured() ? runtime.ticketEnvironment(ticket) : [], ...remote ? { remote } : {} }
 }
 export type TicketPageView = ReturnType<typeof ticketPage>
 function promptsView(runtime: HttpHost, revision: number | undefined, offset: number) {
@@ -154,6 +157,11 @@ function routes(runtime: HttpHost): Routes {
   const promptBody = (input: { body: (maxBytes?: number) => Promise<unknown> }) => input.body(4 * runtime.machine.promptMaxChars.get() + 4096)
   return {
     'GET state': () => stateView(runtime),
+    // Only a remote executor has a runner side to report; the in-container executor answers null.
+    'GET remote': async () => {
+      const status = (runtime.executor as { status?: () => Promise<RemoteStatus> }).status
+      return status ? await status.call(runtime.executor) : null
+    },
     'GET overview': () => overview(views(runtime), runtime.health, policyVersion(store.settings()),
       executorLoad(store, runtime.executor.activeCount()), runtime.setupProblem ?? runtime.feishuProblem),
     'GET search': ({ query }) => search(views(runtime), query.q ?? '', runtime.sourceLinks),

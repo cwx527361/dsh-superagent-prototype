@@ -9,8 +9,29 @@ import { usePanel } from './provider.tsx'
 import { TicketLine } from './rows.tsx'
 import { ConfigHistory, Field, Fields, ModelField, numberOf, useBlockDraft, useSettings } from './settings-kit.tsx'
 import { localized } from './text.ts'
-import { ConfirmButton, Hint, LabelValue, LoadMore, LoadState, Section, StatusHead } from './widgets.tsx'
+import { ConfirmButton, Hint, KeyValues, LabelValue, LoadMore, LoadState, Section, StatusHead } from './widgets.tsx'
+import { Tag } from './controls.tsx'
 
+/** The runner side of a remote deployment: the hub, its devices and the jobs it holds, polled like the ticket list. */
+function RemoteRunners() {
+  const { t, call } = usePanel()
+  const { data, error } = usePoll(() => call('GET remote'), [])
+  if (error || !data) return null
+  return <Section title={t('remoteRunners')} count={data.runners.length}>
+    <div className="dt-row-meta">
+      <Tag tone={data.healthy ? 'success' : 'danger'}>{data.healthy ? t('remoteHealthy') : t('remoteUnhealthy')}</Tag>
+      <span className="dt-mono">{data.hub}</span>
+      <span>{data.detail}</span>
+    </div>
+    {data.runners.length > 0 ? <ul className="dt-list">{data.runners.map(runner => <li key={runner.id} className="dt-row">
+      <div className="dt-row-main"><div className="dt-row-title dt-mono">{runner.id}</div>
+        <div className="dt-row-meta"><span>{runner.os}/{runner.arch}</span><span>{runner.version}</span>
+          <LabelValue label={t('executingLabel')} value={runner.running} /></div></div>
+    </li>)}</ul> : <Hint>{t('remoteNoRunners')}</Hint>}
+    {data.jobs.length > 0 && <KeyValues rows={data.jobs.map(job => [job.id,
+      `${job.ticket} · ${job.status} · ${job.deviceId}`])} />}
+  </Section>
+}
 export function ExecutionStatus({ filter: current, state, reload }: {
   filter: TicketFilter; state: StateView; reload: () => Promise<void>
 }) {
@@ -36,6 +57,7 @@ export function ExecutionStatus({ filter: current, state, reload }: {
         ? 'resumeProcessingConfirm' : 'pauseProcessingConfirm')}
         onConfirm={pause} />
     </div>
+    <RemoteRunners />
     <div className="dt-filters">
       {TICKET_FILTERS.map(value => <Pill key={value} active={current === value}
         onClick={() => { setLimit(20); navigate({ page: 'execution', query: value === 'open' ? {} : { filter: value } },

@@ -22,8 +22,19 @@ services:
       # POC: the local opencode server runs on the host, outside this container.
       OPENCODE_URL: ${OPENCODE_URL:-http://host.docker.internal:4097}
       OPENCODE_PASSWORD: ${OPENCODE_PASSWORD:-}
+      # Remote execution: dispatch assignments to the local runner through the
+      # hub instead of running worker Sessions in this container. Comment this
+      # block out to fall back to the in-container executor.
+      DSH_REMOTE_HUB: ${DSH_REMOTE_HUB:-http://hub:4096}
+      DSH_REMOTE_TOKEN: ${HUB_TOKEN:-dev-token}
+      DSH_REMOTE_REPO_DIR: ${DSH_REMOTE_REPO_DIR:-/Users/chenlei/workspace/cpxx-superagent/dsh-superagent-prototype}
+      DSH_REMOTE_BASE: ${DSH_REMOTE_BASE:-main}
+      DSH_REMOTE_MODEL: ${DSH_REMOTE_MODEL:-deepseek/deepseek-flash}
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    depends_on:
+      hub:
+        condition: service_started
     healthcheck:
       test: ["CMD", "/usr/local/bin/dsh-superagent-healthcheck"]
       interval: 30s

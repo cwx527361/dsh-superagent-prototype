@@ -65,6 +65,15 @@ export class HubClient {
     if (!jobId) throw new Error('the hub did not return a job id')
     return jobId
   }
+  /** Reads the hub's health: protocol, connected runners and job counters. */
+  async health(): Promise<{ ok?: boolean; protocol?: number; runners?: RemoteStatus['runners']; jobs?: { queued?: number; running?: number; done?: number } }> {
+    return await this.call('/health', 'GET') as { ok?: boolean; runners?: RemoteStatus['runners'] }
+  }
+  /** Lists the hub's jobs, newest first. */
+  async jobs(): Promise<{ id: string; ticket: string; status: string; deviceId: string }[]> {
+    const response = await this.call('/jobs', 'GET') as { jobs?: JobSummary[] } | JobSummary[]
+    return Array.isArray(response) ? response : response.jobs ?? []
+  }
   /** Reads a job's current state. */
   async job(jobId: string): Promise<HubJob> { return await this.call(`/jobs/${encodeURIComponent(jobId)}`, 'GET') as HubJob }
   /** Steers a running job with a person's message. */
@@ -85,6 +94,28 @@ export class HubClient {
     return text ? JSON.parse(text) : {}
   }
 }
+/** What the panel shows about one ticket's remote job; kept after the job ends so the result stays visible. */
+export interface RemoteJobView {
+  jobId: string
+  state: string
+  startedAt: string
+  branch?: string
+  commit?: string
+  diffstat?: string
+  cause?: string
+  /** The last lines the runner streamed, oldest first. */
+  lines: string[]
+}
+/** The panel's overview of the runner side: the hub, the devices connected to it, and the jobs it holds. */
+export interface RemoteStatus {
+  hub: string
+  healthy: boolean
+  detail: string
+  runners: { id: string; os: string; arch: string; version: string; running: number }[]
+  jobs: { id: string; ticket: string; status: string; deviceId: string }[]
+}
+/** One hub job as the hub lists it. */
+interface JobSummary { id: string; ticket: string; status: string; deviceId: string }
 /** One ticket's remote job. */
 interface RunningJob {
   jobId?: string
@@ -100,6 +131,7 @@ interface RunningJob {
  */
 export class RemoteExecutor implements Executor {
   private readonly jobs = new Map<string, RunningJob>()
+  private readonly views = new Map<string, RemoteJobView>()
   private readonly queue: { ticket: Ticket; assignment: Assignment }[] = []
   private readonly client: HubClient
   private stopping = false
@@ -111,7 +143,19 @@ export class RemoteExecutor implements Executor {
   prepare(ticket: Ticket, outcome: Extract<AssessmentOutcome, { kind: 'accept' }>): Ticket {
     return { ...ticket, execution: ticketExecution(ticket, outcome, this.host.store.settings(), this.host.machine.stateDir) }
   }
-  /** Queues a pending assignment for a runner. */
+  /** Reads the hub's health and jobs for the panel's execution view; failures become an unhealthy status, not an error. */
+  async status(): Promise<RemoteStatus> {
+    const base = this.host.hub.url.replace(/\/+$/, '')
+    try {
+      const [health, jobs] = await Promise.all([this.client.health(), this.client.jobs()])
+      return { hub: base, healthy: Boolean(health.ok), detail: health.ok ? `${health.runners?.length ?? 0} runner(s), ${health.jobs?.running ?? 0} running` : 'hub reports unhealthy',
+        runners: health.runners ?? [], jobs: (jobs ?? []).filter(job => job.status === 'offered' || job.status === 'running') }
+    } catch (error: unknown) {
+      return { hub: base, healthy: false, detail: String(error).slice(0, 200), runners: [], jobs: [] }
+    }
+  }
+  /** The panel's view of a ticket's remote job, if it has one. */
+  jobView(ticketId: string): RemoteJobView | undefined { return this.views.get(ticketId) }
   start(ticket: Ticket, assignment: Assignment): void {
     if (this.stopping || this.host.closing()) return
     this.queue.push({ ticket, assignment })
@@ -211,8 +255,9 @@ export class RemoteExecutor implements Executor {
     try {
       this.host.engine.assignmentStarted(ticket.id, assignment.id)
       job.jobId = await this.client.submit({ ticket: ticket.id, prompt: this.prompt(ticket), branch: `feat/${ticket.id}` })
+      this.views.set(ticket.id, { jobId: job.jobId, state: 'offered', startedAt: new Date().toISOString(), lines: [] })
       job.markReady()
-      const terminal = await this.wait(job.jobId, abort.signal)
+      const terminal = await this.wait(job.jobId, abort.signal, ticket.id)
       if (abort.signal.aborted) return
       if (terminal.status === 'succeeded') {
         const result = terminal.result ?? {}
@@ -223,6 +268,7 @@ export class RemoteExecutor implements Executor {
       else if (terminal.status === 'failed') {
         this.host.engine.report(ticket.id, { state: 'failed', summary: `${terminal.failure?.cause ?? 'job failed'}: ${terminal.failure?.detail ?? ''}` })
       }
+      this.observe(ticket.id, terminal)
       this.host.engine.turnEnded(ticket.id, assignment.id)
     } catch (error: unknown) {
       if (!abort.signal.aborted) this.host.engine.report(ticket.id, { state: 'failed', summary: `remote executor: ${String(error)}` })
@@ -232,12 +278,31 @@ export class RemoteExecutor implements Executor {
       this.pump()
     }
   }
+  /** Merges a polled job into its view: the state, its result, and the new lines the runner streamed. */
+  private observe(ticketId: string, job: HubJob): void {
+    const view = this.views.get(ticketId)
+    if (!view) return
+    view.state = job.status
+    if (job.result?.branch) view.branch = job.result.branch
+    if (job.result?.commit) view.commit = job.result.commit
+    if (job.result?.diffstat) view.diffstat = job.result.diffstat
+    if (job.failure?.cause) view.cause = job.failure.cause
+    const seen = new Set(view.lines)
+    for (const event of job.events ?? []) {
+      const text = typeof event.data === 'string' ? event.data : (event.data as { text?: string } | undefined)?.text
+      if (event.kind !== 'log' || !text || seen.has(text)) continue
+      seen.add(text)
+      view.lines.push(text.trim().split('\n').slice(0, 3).join(' ').slice(0, 200))
+    }
+    view.lines = view.lines.slice(-40)
+  }
   /** Polls a job until it is terminal or `signal` aborts. */
-  private async wait(jobId: string, signal: AbortSignal): Promise<HubJob> {
+  private async wait(jobId: string, signal: AbortSignal, ticketId: string): Promise<HubJob> {
     const interval = this.host.hub.pollMs ?? 2000
     for (;;) {
       if (signal.aborted) throw new Error('cancelled')
       const job = await this.client.job(jobId)
+      this.observe(ticketId, job)
       if (job.status === 'succeeded' || job.status === 'failed' || job.status === 'cancelled') return job
       await new Promise<void>(resolve => {
         const timer = setTimeout(resolve, interval)
